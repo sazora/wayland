@@ -30,6 +30,16 @@ const DEFAULT_STATE: ProjectExecutiveAssistantState = {
   outbound: [],
 };
 
+type DeliveryStatus = {
+  status?: string;
+  errorCode?: number | string | null;
+  errorMessage?: string | null;
+};
+
+type DeliveryStatusPlugin = BasePlugin & {
+  getMessageStatus?: (messageId: string) => Promise<DeliveryStatus | null>;
+};
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+?[0-9][0-9().\-\s]{6,}$/;
 
@@ -91,6 +101,30 @@ function pickPlugin(channel: ProjectCommunicationChannel): BasePlugin | null {
   }
   return null;
 }
+
+async function readDeliveryStatus(plugin: BasePlugin, providerMessageId: string): Promise<DeliveryStatus | null> {
+  const statusReader = (plugin as DeliveryStatusPlugin).getMessageStatus;
+  if (typeof statusReader !== 'function') return null;
+  try {
+    return await statusReader.call(plugin, providerMessageId);
+  } catch {
+    return null;
+  }
+}
+
+const providerDeliveryFailed = (status: DeliveryStatus | null): boolean => {
+  const normalized = status?.status?.toLowerCase();
+  return normalized === 'failed' || normalized === 'undelivered';
+};
+
+const formatDeliveryError = (status: DeliveryStatus): string => {
+  const code = status.errorCode ? ` ${status.errorCode}` : '';
+  const providerMessage = status.errorMessage ? `: ${status.errorMessage}` : '';
+  if (String(status.errorCode) === '30034') {
+    return `Twilio delivery failed${code}: US A2P 10DLC blocked this message because the sender is not registered for US application-to-person texting.`;
+  }
+  return `Provider delivery ${status.status || 'failed'}${code}${providerMessage}`;
+};
 
 export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
   const plugins = runningPlugins();
@@ -265,6 +299,17 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
       text: formatProjectOutboundBody(sendChannel, message.body),
       subject: message.subject,
     });
+    const deliveryStatus = await readDeliveryStatus(plugin, providerMessageId);
+    if (providerDeliveryFailed(deliveryStatus)) {
+      message.status = 'failed';
+      message.failedAt = Date.now();
+      message.modifyTime = message.failedAt;
+      message.provider = plugin.type;
+      message.providerMessageId = providerMessageId;
+      message.error = formatDeliveryError(deliveryStatus!);
+      await writeState(workspace, state);
+      return message;
+    }
     message.status = 'sent';
     message.sentAt = Date.now();
     message.modifyTime = message.sentAt;

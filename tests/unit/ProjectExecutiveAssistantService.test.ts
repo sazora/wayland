@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -20,9 +20,27 @@ import {
 } from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
 
 let ws: string;
+type MockChannelPlugin = {
+  status: string;
+  type: string;
+  sendMessage?: unknown;
+  getMessageStatus?: unknown;
+};
+const channelMocks = vi.hoisted(() => ({
+  plugins: [] as MockChannelPlugin[],
+}));
+
+vi.mock('@process/channels', () => ({
+  getChannelManager: () => ({
+    getPluginManager: () => ({
+      getAllPlugins: () => channelMocks.plugins,
+    }),
+  }),
+}));
 
 beforeEach(async () => {
   ws = await fs.mkdtemp(path.join(os.tmpdir(), 'wl-project-ea-'));
+  channelMocks.plugins = [];
 });
 
 afterEach(async () => {
@@ -103,6 +121,36 @@ describe('ProjectExecutiveAssistantService', () => {
 
     const state = await readProjectExecutiveAssistant(ws);
     expect(state.outbound.map((message) => message.status)).toEqual(['failed', 'failed']);
+  });
+
+  it('marks Twilio sends as failed when the provider immediately reports undelivered', async () => {
+    const sendMessage = vi.fn().mockResolvedValue('SMblocked');
+    const getMessageStatus = vi.fn().mockResolvedValue({
+      status: 'undelivered',
+      errorCode: 30034,
+      errorMessage: null,
+    });
+    channelMocks.plugins = [
+      {
+        status: 'running',
+        type: 'sms-twilio',
+        sendMessage,
+        getMessageStatus,
+      },
+    ];
+
+    const outbound = await createProjectOutbound(ws, {
+      channel: 'sms',
+      to: '+14125550123',
+      body: 'Text through Twilio.',
+      requiresApproval: false,
+    });
+
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(getMessageStatus).toHaveBeenCalledWith('SMblocked');
+    expect(outbound.status).toBe('failed');
+    expect(outbound.providerMessageId).toBe('SMblocked');
+    expect(outbound.error).toContain('US A2P 10DLC');
   });
 
   it('adds the no-inbound-replies notice to Project Assistant SMS bodies', () => {

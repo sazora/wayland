@@ -275,6 +275,20 @@ export class SmsTwilioPlugin extends BasePlugin {
     return await this.sendWithRetry(params);
   }
 
+  async getMessageStatus(
+    messageSid: string
+  ): Promise<{ status: string; errorCode: number | null; errorMessage: string | null }> {
+    if (!this.client) {
+      throw new Error('Twilio client not initialized');
+    }
+    const result = await this.client.messages(messageSid).fetch();
+    return {
+      status: result.status,
+      errorCode: result.errorCode ?? null,
+      errorMessage: result.errorMessage ?? null,
+    };
+  }
+
   /**
    * Convert a verified Twilio inbound payload into the unified format and
    * emit through the registered message handler.
