@@ -50,6 +50,8 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
 
   const [accountSid, setAccountSid] = useState('');
   const [authToken, setAuthToken] = useState('');
+  const [apiKeySid, setApiKeySid] = useState('');
+  const [apiKeySecret, setApiKeySecret] = useState('');
   const [fromNumber, setFromNumber] = useState('');
   const [messagingServiceSid, setMessagingServiceSid] = useState('');
 
@@ -90,6 +92,8 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
     const credentials = {
       accountSid: accountSid.trim(),
       authToken: authToken.trim(),
+      apiKeySid: apiKeySid.trim(),
+      apiKeySecret: apiKeySecret.trim(),
       fromNumber: fromNumber.trim(),
       messagingServiceSid: messagingServiceSid.trim(),
     };
@@ -97,8 +101,28 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
       Message.warning(t('settings.channels.smsTwilio.credentials.accountSid.required', 'Account SID is required'));
       return;
     }
-    if (!credentials.authToken) {
-      Message.warning(t('settings.channels.smsTwilio.credentials.authToken.required', 'Auth Token is required'));
+    const hasLegacyAuthToken = credentials.authToken.length > 0;
+    const hasApiKeyCredentials = credentials.apiKeySid.length > 0 || credentials.apiKeySecret.length > 0;
+    if (!hasLegacyAuthToken && !hasApiKeyCredentials) {
+      Message.warning(
+        t(
+          'settings.channels.smsTwilio.credentials.auth.required',
+          'Provide either an Auth Token or API Key SID + Secret'
+        )
+      );
+      return;
+    }
+    if (hasApiKeyCredentials && (!credentials.apiKeySid || !credentials.apiKeySecret)) {
+      Message.warning(
+        t(
+          'settings.channels.smsTwilio.credentials.apiKey.required',
+          'Both API Key SID and API Key Secret are required'
+        )
+      );
+      return;
+    }
+    if (credentials.apiKeySid && !credentials.apiKeySid.startsWith('SK')) {
+      Message.warning(t('settings.channels.smsTwilio.credentials.apiKeySid.invalid', 'API Key SID must start with SK'));
       return;
     }
     if (!credentials.fromNumber && !credentials.messagingServiceSid) {
@@ -149,7 +173,17 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
     } finally {
       setSaving(false);
     }
-  }, [accountSid, authToken, fromNumber, fromNumberInvalid, messagingServiceSid, refreshPluginStatus, t]);
+  }, [
+    accountSid,
+    apiKeySecret,
+    apiKeySid,
+    authToken,
+    fromNumber,
+    fromNumberInvalid,
+    messagingServiceSid,
+    refreshPluginStatus,
+    t,
+  ]);
 
   const handleCopyWebhookUrl = useCallback(() => {
     void navigator.clipboard
@@ -209,17 +243,47 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
       </PreferenceRow>
 
       <PreferenceRow
-        label={t('settings.channels.smsTwilio.credentials.authToken.label', 'Auth Token')}
+        label={t('settings.channels.smsTwilio.credentials.apiKeySid.label', 'API Key SID')}
+        description={t(
+          'settings.channels.smsTwilio.credentials.apiKeySid.help',
+          'Recommended. Create an API Key in Twilio Console; the SID starts with "SK".'
+        )}
+      >
+        <Input
+          value={apiKeySid}
+          onChange={(value) => setApiKeySid(value)}
+          placeholder={t('settings.channels.smsTwilio.credentials.apiKeySid.placeholder', 'SKxxxxxxxxxxxxxxxx')}
+          style={{ width: 280 }}
+        />
+      </PreferenceRow>
+
+      <PreferenceRow
+        label={t('settings.channels.smsTwilio.credentials.apiKeySecret.label', 'API Key Secret')}
+        description={t(
+          'settings.channels.smsTwilio.credentials.apiKeySecret.help',
+          'Use with API Key SID. Safer than the master account Auth Token.'
+        )}
+      >
+        <Input.Password
+          value={apiKeySecret}
+          onChange={(value) => setApiKeySecret(value)}
+          placeholder={t('settings.channels.smsTwilio.credentials.apiKeySecret.placeholder', 'api key secret')}
+          visibilityToggle
+          style={{ width: 280 }}
+        />
+      </PreferenceRow>
+
+      <PreferenceRow
+        label={t('settings.channels.smsTwilio.credentials.authToken.label', 'Legacy Auth Token')}
         description={t(
           'settings.channels.smsTwilio.credentials.authToken.help',
-          'Treat the auth token like a password - Twilio signs every webhook with it.'
+          'Optional fallback. Prefer API Key SID + Secret unless Twilio requires the account Auth Token.'
         )}
-        required
       >
         <Input.Password
           value={authToken}
           onChange={(value) => setAuthToken(value)}
-          placeholder={t('settings.channels.smsTwilio.credentials.authToken.placeholder', 'auth token')}
+          placeholder={t('settings.channels.smsTwilio.credentials.authToken.placeholder', 'optional auth token')}
           visibilityToggle
           style={{ width: 280 }}
         />

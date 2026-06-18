@@ -126,6 +126,8 @@ export class SmsTwilioPlugin extends BasePlugin {
       const parsed = JSON.parse(token) as {
         accountSid?: string;
         authToken?: string;
+        apiKeySid?: string;
+        apiKeySecret?: string;
         fromNumber?: string;
         messagingServiceSid?: string;
       };
@@ -158,17 +160,29 @@ export class SmsTwilioPlugin extends BasePlugin {
     const creds = config.credentials ?? {};
     const accountSid = typeof creds.accountSid === 'string' ? creds.accountSid.trim() : '';
     const authToken = typeof creds.authToken === 'string' ? creds.authToken.trim() : '';
+    const apiKeySid = typeof creds.apiKeySid === 'string' ? creds.apiKeySid.trim() : '';
+    const apiKeySecret = typeof creds.apiKeySecret === 'string' ? creds.apiKeySecret.trim() : '';
     const fromNumber = typeof creds.fromNumber === 'string' ? creds.fromNumber.trim() : '';
     const messagingServiceSid =
       typeof creds.messagingServiceSid === 'string' ? creds.messagingServiceSid.trim() : '';
 
     if (!accountSid) throw new Error('Twilio Account SID is required');
-    if (!authToken) throw new Error('Twilio Auth Token is required');
+    const hasLegacyAuthToken = authToken.length > 0;
+    const hasApiKeyCredentials = apiKeySid.length > 0 || apiKeySecret.length > 0;
+    if (!hasLegacyAuthToken && !hasApiKeyCredentials) {
+      throw new Error('Twilio Auth Token or API Key credentials are required');
+    }
+    if (hasApiKeyCredentials && (!apiKeySid || !apiKeySecret)) {
+      throw new Error('Both Twilio API Key SID and API Key Secret are required');
+    }
     if (!fromNumber && !messagingServiceSid) {
       throw new Error('Either a From Number or Messaging Service SID is required');
     }
     if (!accountSid.startsWith('AC')) {
       throw new Error('Twilio Account SID must start with "AC"');
+    }
+    if (apiKeySid && !apiKeySid.startsWith('SK')) {
+      throw new Error('Twilio API Key SID must start with "SK"');
     }
     if (fromNumber && !E164_REGEX.test(fromNumber)) {
       throw new Error('fromNumber must be E.164 format (e.g., +14155550123)');
@@ -180,7 +194,9 @@ export class SmsTwilioPlugin extends BasePlugin {
     this.accountSid = accountSid;
     this.fromNumber = fromNumber || null;
     this.messagingServiceSid = messagingServiceSid || null;
-    this.client = twilio(accountSid, authToken);
+    this.client = hasApiKeyCredentials
+      ? twilio(apiKeySid, apiKeySecret, { accountSid })
+      : twilio(accountSid, authToken);
   }
 
   /**

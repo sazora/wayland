@@ -9,10 +9,13 @@ import type { IChannelPluginConfig } from '@process/channels/types';
 
 // Shared spy so the test can assert the SDK was called with the right params.
 // Hoisted via vi.hoisted because vi.mock factory runs before the test body.
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, twilioClientMock } = vi.hoisted(() => ({
+  createMock: vi.fn(),
+  twilioClientMock: vi.fn((_sid: string, _token: string) => ({ messages: { create: createMock } })),
+}));
 
 vi.mock('twilio', () => ({
-  default: (_sid: string, _token: string) => ({ messages: { create: createMock } }),
+  default: twilioClientMock,
 }));
 
 import { SmsTwilioPlugin, TwilioRestError } from '@process/channels/plugins/tier1/sms/SmsTwilioPlugin';
@@ -36,6 +39,7 @@ describe('SmsTwilioPlugin.sendMessage', () => {
   beforeEach(() => {
     createMock.mockReset();
     createMock.mockResolvedValue({ sid: 'SM_sent_0001' });
+    twilioClientMock.mockClear();
   });
 
   it('calls twilio.messages.create with to/body/from when only fromNumber is set', async () => {
@@ -78,7 +82,7 @@ describe('SmsTwilioPlugin.sendMessage', () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it('refuses to initialize without Account SID, Auth Token, or any sender', async () => {
+  it('refuses to initialize without Account SID, auth credentials, or any sender', async () => {
     const plugin = new SmsTwilioPlugin();
     await expect(
       plugin.initialize({ ...baseConfig, credentials: { authToken: 'x', fromNumber: '+14155550123' } })
@@ -88,7 +92,7 @@ describe('SmsTwilioPlugin.sendMessage', () => {
         ...baseConfig,
         credentials: { accountSid: 'AC00000000000000000000000000000000', fromNumber: '+14155550123' },
       })
-    ).rejects.toThrow(/Auth Token/);
+    ).rejects.toThrow(/Auth Token or API Key/);
     await expect(
       plugin.initialize({
         ...baseConfig,
@@ -116,6 +120,25 @@ describe('SmsTwilioPlugin.sendMessage', () => {
     expect(info?.displayName).toBe('+14155550123');
   });
 
+  it('initializes the Twilio SDK with API Key SID + Secret when provided', async () => {
+    const plugin = new SmsTwilioPlugin();
+    await plugin.initialize({
+      ...baseConfig,
+      credentials: {
+        accountSid: 'AC00000000000000000000000000000000',
+        apiKeySid: 'SK00000000000000000000000000000000',
+        apiKeySecret: 'api-key-secret-for-testing',
+        fromNumber: '+14155550123',
+      },
+    });
+
+    expect(twilioClientMock).toHaveBeenCalledWith(
+      'SK00000000000000000000000000000000',
+      'api-key-secret-for-testing',
+      { accountSid: 'AC00000000000000000000000000000000' }
+    );
+  });
+
   it('validates JSON credentials through static testConnection', async () => {
     const result = await SmsTwilioPlugin.testConnection(
       JSON.stringify({
@@ -125,6 +148,30 @@ describe('SmsTwilioPlugin.sendMessage', () => {
       })
     );
     expect(result).toEqual({ success: true, botUsername: '+14155550123' });
+  });
+
+  it('validates API Key credentials through static testConnection', async () => {
+    const result = await SmsTwilioPlugin.testConnection(
+      JSON.stringify({
+        accountSid: 'AC00000000000000000000000000000000',
+        apiKeySid: 'SK00000000000000000000000000000000',
+        apiKeySecret: 'api-key-secret-for-testing',
+        fromNumber: '+14155550123',
+      })
+    );
+    expect(result).toEqual({ success: true, botUsername: '+14155550123' });
+  });
+
+  it('returns a clear static testConnection error for partial API Key credentials', async () => {
+    const result = await SmsTwilioPlugin.testConnection(
+      JSON.stringify({
+        accountSid: 'AC00000000000000000000000000000000',
+        apiKeySid: 'SK00000000000000000000000000000000',
+        fromNumber: '+14155550123',
+      })
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('API Key Secret');
   });
 
   it('returns a clear static testConnection error for missing sender', async () => {
