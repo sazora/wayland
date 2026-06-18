@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { withCsrfToken } from '@process/webserver/middleware/csrfClient';
 import { Button, Message } from '@arco-design/web-react';
 import { Ban, DownloadCloud, ExternalLink, FileText, FolderOpen, Paperclip, X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -180,7 +181,7 @@ const ProjectReferencePanel: React.FC<{
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ id: projectId, ingestId, url }),
+          body: JSON.stringify(withCsrfToken({ id: projectId, ingestId, url })),
         });
         const result = await response.json().catch((): null => null);
         if (!response.ok || result?.ok === false) throw new Error(result?.error || 'remote-attachment-import-failed');
@@ -205,7 +206,7 @@ const ProjectReferencePanel: React.FC<{
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ id: projectId, ingestId, url }),
+          body: JSON.stringify(withCsrfToken({ id: projectId, ingestId, url })),
         });
         const result = await response.json().catch((): null => null);
         if (!response.ok || result?.ok === false) throw new Error(result?.error || 'remote-attachment-ignore-failed');
