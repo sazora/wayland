@@ -158,9 +158,11 @@ export function hasPluginCredentials(type: PluginType, credentials?: IPluginCred
   if (type === 'slack') return !!credentials.botToken;
   if (type === 'discord') return !!credentials.botToken;
   if (type === 'sms-twilio') {
+    const hasLegacyAuthToken = !!credentials.authToken;
+    const hasApiKeyCredentials = !!(credentials.apiKeySid && credentials.apiKeySecret);
     return !!(
       credentials.accountSid &&
-      credentials.authToken &&
+      (hasLegacyAuthToken || hasApiKeyCredentials) &&
       (credentials.fromNumber || credentials.messagingServiceSid)
     );
   }

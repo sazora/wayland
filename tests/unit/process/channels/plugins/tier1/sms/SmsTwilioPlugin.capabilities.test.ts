@@ -15,6 +15,7 @@ vi.mock('twilio', () => ({
 }));
 
 import { SmsTwilioPlugin } from '@process/channels/plugins/tier1/sms/SmsTwilioPlugin';
+import { hasPluginCredentials } from '@process/channels/types';
 
 describe('SmsTwilioPlugin capabilities', () => {
   it('declares pure buffered mode - no edit, no stream, no react, no typing', () => {
@@ -42,5 +43,26 @@ describe('SmsTwilioPlugin capabilities', () => {
     // Default no-op resolves silently - proves the plugin relies on the
     // BasePlugin default for non-edit-capable platforms.
     await expect(plugin.editMessage('+15550001234', 'SM123', { type: 'text', text: 'x' })).resolves.toBeUndefined();
+  });
+
+  it('treats Twilio API Key SID + Secret as configured credentials', () => {
+    expect(
+      hasPluginCredentials('sms-twilio', {
+        accountSid: 'AC00000000000000000000000000000000',
+        apiKeySid: 'SK00000000000000000000000000000000',
+        apiKeySecret: 'api-key-secret-for-testing',
+        messagingServiceSid: 'MG00000000000000000000000000000000',
+      })
+    ).toBe(true);
+  });
+
+  it('does not treat partial Twilio API Key credentials as configured', () => {
+    expect(
+      hasPluginCredentials('sms-twilio', {
+        accountSid: 'AC00000000000000000000000000000000',
+        apiKeySid: 'SK00000000000000000000000000000000',
+        messagingServiceSid: 'MG00000000000000000000000000000000',
+      })
+    ).toBe(false);
   });
 });
