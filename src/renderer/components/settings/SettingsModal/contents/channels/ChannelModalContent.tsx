@@ -24,13 +24,15 @@ import LarkConfigForm from './chat/LarkConfigForm';
 import TelegramConfigForm from './chat/TelegramConfigForm';
 import WeixinConfigForm from './chat/WeixinConfigForm';
 import WecomConfigForm from './chat/WecomConfigForm';
+import SmsTwilioConfigForm from './messaging/SmsTwilioConfigForm';
 
 type ChannelModelConfigKey =
   | 'assistant.telegram.defaultModel'
   | 'assistant.lark.defaultModel'
   | 'assistant.dingtalk.defaultModel'
   | 'assistant.weixin.defaultModel'
-  | 'assistant.wecom.defaultModel';
+  | 'assistant.wecom.defaultModel'
+  | 'assistant.sms-twilio.defaultModel';
 
 type ExtensionFieldType = 'text' | 'password' | 'select' | 'number' | 'boolean';
 
@@ -45,7 +47,16 @@ type ExtensionFieldSchema = {
 
 type ExtensionFieldValues = Record<string, Record<string, string | number | boolean>>;
 
-const BUILTIN_CHANNEL_TYPES = new Set(['telegram', 'lark', 'dingtalk', 'weixin', 'wecom', 'slack', 'discord']);
+const BUILTIN_CHANNEL_TYPES = new Set([
+  'telegram',
+  'lark',
+  'dingtalk',
+  'weixin',
+  'wecom',
+  'sms-twilio',
+  'slack',
+  'discord',
+]);
 
 /**
  * Internal hook: wraps useGeminiModelSelection with ConfigStorage persistence
@@ -176,11 +187,13 @@ const ChannelModalContent: React.FC = () => {
   const [dingtalkPluginStatus, setDingtalkPluginStatus] = useState<IChannelPluginStatus | null>(null);
   const [weixinPluginStatus, setWeixinPluginStatus] = useState<IChannelPluginStatus | null>(null);
   const [wecomPluginStatus, setWecomPluginStatus] = useState<IChannelPluginStatus | null>(null);
+  const [smsTwilioPluginStatus, setSmsTwilioPluginStatus] = useState<IChannelPluginStatus | null>(null);
   const [enableLoading, setEnableLoading] = useState(false);
   const [larkEnableLoading, setLarkEnableLoading] = useState(false);
   const [dingtalkEnableLoading, setDingtalkEnableLoading] = useState(false);
   const [weixinEnableLoading, setWeixinEnableLoading] = useState(false);
   const [wecomEnableLoading, setWecomEnableLoading] = useState(false);
+  const [smsTwilioEnableLoading, setSmsTwilioEnableLoading] = useState(false);
   const [extensionStatuses, setExtensionStatuses] = useState<Record<string, IChannelPluginStatus>>({});
   const [extensionLoadingMap, setExtensionLoadingMap] = useState<Record<string, boolean>>({});
   const [extensionFieldValues, setExtensionFieldValues] = useState<ExtensionFieldValues>({});
@@ -198,6 +211,7 @@ const ChannelModalContent: React.FC = () => {
     dingtalk: true,
     weixin: true,
     wecom: true,
+    'sms-twilio': true,
   });
 
   // Model selection state - uses unified hook with ConfigStorage persistence
@@ -206,6 +220,7 @@ const ChannelModalContent: React.FC = () => {
   const dingtalkModelSelection = useChannelModelSelection('assistant.dingtalk.defaultModel');
   const weixinModelSelection = useChannelModelSelection('assistant.weixin.defaultModel');
   const wecomModelSelection = useChannelModelSelection('assistant.wecom.defaultModel');
+  const smsTwilioModelSelection = useChannelModelSelection('assistant.sms-twilio.defaultModel');
 
   // Load plugin status
   const loadPluginStatus = useCallback(async () => {
@@ -217,6 +232,7 @@ const ChannelModalContent: React.FC = () => {
         const dingtalkPlugin = result.data.find((p) => p.type === 'dingtalk');
         const weixinPlugin = result.data.find((p) => p.type === 'weixin');
         const wecomPlugin = result.data.find((p) => p.type === 'wecom');
+        const smsTwilioPlugin = result.data.find((p) => p.type === 'sms-twilio');
         const extensionPlugins = result.data.filter((p) => !BUILTIN_CHANNEL_TYPES.has(p.type));
 
         setPluginStatus(telegramPlugin || null);
@@ -224,6 +240,7 @@ const ChannelModalContent: React.FC = () => {
         setDingtalkPluginStatus(dingtalkPlugin || null);
         setWeixinPluginStatus(weixinPlugin || null);
         setWecomPluginStatus(wecomPlugin || null);
+        setSmsTwilioPluginStatus(smsTwilioPlugin || null);
         setExtensionStatuses(() => {
           const next: Record<string, IChannelPluginStatus> = {};
           for (const plugin of extensionPlugins) {
@@ -288,6 +305,8 @@ const ChannelModalContent: React.FC = () => {
         setWeixinPluginStatus(status);
       } else if (status.type === 'wecom') {
         setWecomPluginStatus(status);
+      } else if (status.type === 'sms-twilio') {
+        setSmsTwilioPluginStatus(status);
       } else if (!BUILTIN_CHANNEL_TYPES.has(status.type)) {
         setExtensionStatuses((prev) => ({
           ...prev,
@@ -508,6 +527,43 @@ const ChannelModalContent: React.FC = () => {
       Message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setWecomEnableLoading(false);
+    }
+  };
+
+  const handleToggleSmsTwilioPlugin = async (enabled: boolean) => {
+    setSmsTwilioEnableLoading(true);
+    try {
+      if (enabled) {
+        if (!smsTwilioPluginStatus?.hasToken) {
+          Message.warning(t('settings.channels.smsTwilio.configureFirst', 'Save Twilio credentials first'));
+          setSmsTwilioEnableLoading(false);
+          return;
+        }
+        const result = await channel.enablePlugin.invoke({
+          pluginId: 'sms-twilio_default',
+          config: {},
+        });
+        if (result.success) {
+          Message.success(t('settings.channels.smsTwilio.pluginEnabled', 'Twilio SMS channel enabled'));
+          await loadPluginStatus();
+        } else {
+          Message.error(result.msg || t('settings.channels.smsTwilio.enableFailed', 'Failed to enable Twilio SMS'));
+        }
+      } else {
+        const result = await channel.disablePlugin.invoke({
+          pluginId: 'sms-twilio_default',
+        });
+        if (result.success) {
+          Message.success(t('settings.channels.smsTwilio.pluginDisabled', 'Twilio SMS channel disabled'));
+          await loadPluginStatus();
+        } else {
+          Message.error(result.msg || t('settings.channels.smsTwilio.disableFailed', 'Failed to disable Twilio SMS'));
+        }
+      }
+    } catch (error: unknown) {
+      Message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSmsTwilioEnableLoading(false);
     }
   };
 
@@ -804,6 +860,25 @@ const ChannelModalContent: React.FC = () => {
       ),
     };
 
+    const smsTwilioChannel: ChannelConfig = {
+      id: 'sms-twilio',
+      title: t('settings.channels.smsTwilioTitle', 'SMS (Twilio)'),
+      description: t('settings.channels.smsTwilioDesc', 'Send and receive project SMS through Twilio'),
+      status: 'active',
+      enabled: smsTwilioPluginStatus?.enabled || false,
+      disabled: smsTwilioEnableLoading,
+      isConnected: smsTwilioPluginStatus?.connected || false,
+      botUsername: smsTwilioPluginStatus?.botUsername,
+      defaultModel: smsTwilioModelSelection.currentModel?.useModel,
+      content: (
+        <SmsTwilioConfigForm
+          pluginStatus={smsTwilioPluginStatus}
+          modelSelection={smsTwilioModelSelection}
+          onStatusChange={setSmsTwilioPluginStatus}
+        />
+      ),
+    };
+
     const extensionChannels: ChannelConfig[] = Object.values(extensionStatuses)
       .toSorted((a, b) => a.name.localeCompare(b.name))
       .map((status) => ({
@@ -863,6 +938,7 @@ const ChannelModalContent: React.FC = () => {
       dingtalkChannel,
       weixinChannel,
       wecomChannel,
+      smsTwilioChannel,
       ...extensionChannels,
       ...comingSoonChannels,
     ];
@@ -884,6 +960,9 @@ const ChannelModalContent: React.FC = () => {
     wecomPluginStatus,
     wecomEnableLoading,
     wecomModelSelection,
+    smsTwilioPluginStatus,
+    smsTwilioEnableLoading,
+    smsTwilioModelSelection,
     webuiStatus,
     renderExtensionConfigForm,
     t,
@@ -896,6 +975,7 @@ const ChannelModalContent: React.FC = () => {
     if (channelId === 'dingtalk') return handleToggleDingtalkPlugin;
     if (channelId === 'weixin') return handleToggleWeixinPlugin;
     if (channelId === 'wecom') return handleToggleWecomPlugin;
+    if (channelId === 'sms-twilio') return handleToggleSmsTwilioPlugin;
     if (extensionStatuses[channelId]) {
       return (enabled: boolean) => {
         void handleToggleExtensionPlugin(channelId, enabled);

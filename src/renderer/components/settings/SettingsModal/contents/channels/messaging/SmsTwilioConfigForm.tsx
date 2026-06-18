@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Copy, RefreshCw } from 'lucide-react';
+import { Check, Copy, RefreshCw } from 'lucide-react';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
 import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
@@ -45,7 +45,7 @@ interface SmsTwilioConfigFormProps {
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 }
 
-const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange: _onStatusChange }) => {
+const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [accountSid, setAccountSid] = useState('');
@@ -55,6 +55,7 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
 
   const [webhookToken, setWebhookToken] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const pluginInstanceId = pluginStatus?.id ?? 'sms-twilio_default';
 
@@ -76,6 +77,79 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
   }, [webhookToken, tunnelConfigured, rawTunnelHost, t]);
 
   const fromNumberInvalid = fromNumber.length > 0 && !E164_REGEX.test(fromNumber);
+
+  const refreshPluginStatus = useCallback(async () => {
+    if (!onStatusChange) return;
+    const result = await channel.getPluginStatus.invoke();
+    if (result.success && result.data) {
+      onStatusChange(result.data.find((plugin) => plugin.type === 'sms-twilio') ?? null);
+    }
+  }, [onStatusChange]);
+
+  const handleSaveAndEnable = useCallback(async () => {
+    const credentials = {
+      accountSid: accountSid.trim(),
+      authToken: authToken.trim(),
+      fromNumber: fromNumber.trim(),
+      messagingServiceSid: messagingServiceSid.trim(),
+    };
+    if (!credentials.accountSid) {
+      Message.warning(t('settings.channels.smsTwilio.credentials.accountSid.required', 'Account SID is required'));
+      return;
+    }
+    if (!credentials.authToken) {
+      Message.warning(t('settings.channels.smsTwilio.credentials.authToken.required', 'Auth Token is required'));
+      return;
+    }
+    if (!credentials.fromNumber && !credentials.messagingServiceSid) {
+      Message.warning(
+        t(
+          'settings.channels.smsTwilio.credentials.sender.required',
+          'Provide either a From Number or a Messaging Service SID'
+        )
+      );
+      return;
+    }
+    if (fromNumberInvalid) {
+      Message.warning(
+        t('settings.channels.smsTwilio.credentials.fromNumber.invalid', 'Must be E.164 format, e.g. +14155550123')
+      );
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const cleanCredentials = Object.fromEntries(
+        Object.entries(credentials).filter(([, value]) => value.length > 0)
+      );
+      const testResult = await channel.testPlugin.invoke({
+        pluginId: 'sms-twilio',
+        token: JSON.stringify(cleanCredentials),
+      });
+      if (!testResult.success || !testResult.data?.success) {
+        Message.error(
+          testResult.data?.error ??
+            testResult.msg ??
+            t('settings.channels.smsTwilio.connectionFailed', 'Twilio credential validation failed')
+        );
+        return;
+      }
+      const enableResult = await channel.enablePlugin.invoke({
+        pluginId: 'sms-twilio_default',
+        config: cleanCredentials,
+      });
+      if (!enableResult.success) {
+        Message.error(enableResult.msg ?? t('settings.channels.smsTwilio.enableFailed', 'Failed to enable Twilio SMS'));
+        return;
+      }
+      Message.success(t('settings.channels.smsTwilio.pluginEnabled', 'Twilio SMS channel enabled'));
+      await refreshPluginStatus();
+    } catch (error) {
+      Message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }, [accountSid, authToken, fromNumber, fromNumberInvalid, messagingServiceSid, refreshPluginStatus, t]);
 
   const handleCopyWebhookUrl = useCallback(() => {
     void navigator.clipboard
@@ -240,6 +314,16 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
           'US deployments require A2P 10DLC brand and campaign registration. Toll-free numbers require separate verification. Both processes can take several days.'
         )}
       />
+      <div className='flex justify-end'>
+        <Button
+          type='primary'
+          icon={<Check size={14} />}
+          loading={saving}
+          onClick={() => void handleSaveAndEnable()}
+        >
+          {t('settings.channels.smsTwilio.saveAndEnable', 'Save & Enable Twilio SMS')}
+        </Button>
+      </div>
       <ChannelAgentModelSelector platform='sms-twilio' modelSelection={modelSelection} />
 
     </div>

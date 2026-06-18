@@ -119,6 +119,34 @@ export class SmsTwilioPlugin extends BasePlugin {
   private messagingServiceSid: string | null = null;
   private readonly activeUsers: Set<string> = new Set();
 
+  static async testConnection(
+    token: string
+  ): Promise<{ success: boolean; botUsername?: string; error?: string }> {
+    try {
+      const parsed = JSON.parse(token) as {
+        accountSid?: string;
+        authToken?: string;
+        fromNumber?: string;
+        messagingServiceSid?: string;
+      };
+      const plugin = new SmsTwilioPlugin();
+      await plugin.initialize({
+        id: 'sms-twilio_test',
+        type: 'sms-twilio',
+        name: 'SMS (Twilio)',
+        enabled: false,
+        status: 'created',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        credentials: parsed,
+      });
+      const info = plugin.getBotInfo();
+      return { success: true, botUsername: info?.displayName };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   /**
    * Validate credentials + construct the Twilio REST client.
    *

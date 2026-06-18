@@ -94,7 +94,8 @@ export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
   const plugins = runningPlugins();
   const has = (types: string[]): BasePlugin | undefined => plugins.find((plugin) => types.includes(plugin.type));
   const email = has(['email-agentmail', 'email-imap']);
-  const sms = has(['sms-twilio', 'bluebubbles', 'imessage']);
+  const twilioSms = has(['sms-twilio']);
+  const sms = twilioSms ?? has(['bluebubbles', 'imessage']);
   const appleMessages = has(['bluebubbles', 'imessage']);
   return [
     {
@@ -113,9 +114,11 @@ export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
       channel: 'sms',
       available: Boolean(sms),
       provider: sms?.type,
-      note: sms
-        ? `SMS can send through ${sms.type}. Apple Messages/BlueBubbles SMS still requires a paired iPhone with an active carrier line.`
-        : 'Configure Twilio, iMessage, or BlueBubbles before sending SMS.',
+      note: twilioSms
+        ? 'Business SMS is available through Twilio. US SMS may still require A2P 10DLC registration to avoid carrier filtering.'
+        : sms
+          ? `SMS can send through ${sms.type}. Apple Messages/BlueBubbles SMS still requires a paired iPhone with an active carrier line.`
+          : 'Configure Twilio for business SMS, or iMessage/BlueBubbles for Apple relay SMS.',
     },
     {
       channel: 'rcs',

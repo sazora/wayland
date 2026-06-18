@@ -116,6 +116,28 @@ describe('SmsTwilioPlugin.sendMessage', () => {
     expect(info?.displayName).toBe('+14155550123');
   });
 
+  it('validates JSON credentials through static testConnection', async () => {
+    const result = await SmsTwilioPlugin.testConnection(
+      JSON.stringify({
+        accountSid: 'AC00000000000000000000000000000000',
+        authToken: 'auth-token-for-testing',
+        fromNumber: '+14155550123',
+      })
+    );
+    expect(result).toEqual({ success: true, botUsername: '+14155550123' });
+  });
+
+  it('returns a clear static testConnection error for missing sender', async () => {
+    const result = await SmsTwilioPlugin.testConnection(
+      JSON.stringify({
+        accountSid: 'AC00000000000000000000000000000000',
+        authToken: 'auth-token-for-testing',
+      })
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('From Number or Messaging Service SID');
+  });
+
   // F7 fix: backend enforces E.164 + MG-SID shape, so malformed values fail
   // with a clear local error instead of an opaque Twilio REST 400.
   it('rejects a non-E.164 fromNumber at initialize (F7)', async () => {
