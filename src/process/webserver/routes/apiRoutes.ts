@@ -184,7 +184,7 @@ const handleProjectEmailRemoteImport = wrapRouteHandler(async (req: Request, res
     return;
   }
   const result = await importProjectEmailRemoteAttachment(project.workspace, ingestId, url);
-  if (!result.ok) {
+  if (result.ok === false) {
     res.status(result.status).json({ ok: false, error: result.error });
     return;
   }
@@ -203,7 +203,7 @@ const handleProjectEmailRemoteIgnore = wrapRouteHandler(async (req: Request, res
     return;
   }
   const result = await ignoreProjectEmailRemoteAttachment(project.workspace, ingestId, url);
-  if (!result.ok) {
+  if (result.ok === false) {
     res.status(result.status).json({ ok: false, error: result.error });
     return;
   }

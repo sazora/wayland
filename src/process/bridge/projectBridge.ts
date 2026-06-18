@@ -297,7 +297,7 @@ export function initProjectBridge(): void {
     const project = await projectService.getProject(id);
     if (!project?.workspace) return { ok: false, error: 'project-has-no-workspace' };
     const result = await importProjectEmailRemoteAttachment(project.workspace, ingestId, url);
-    if (!result.ok) return { ok: false, error: result.error };
+    if (result.ok === false) return { ok: false, error: result.error };
     return { ok: true, file: result.file };
   });
 
@@ -305,7 +305,7 @@ export function initProjectBridge(): void {
     const project = await projectService.getProject(id);
     if (!project?.workspace) return { ok: false, error: 'project-has-no-workspace' };
     const result = await ignoreProjectEmailRemoteAttachment(project.workspace, ingestId, url);
-    if (!result.ok) return { ok: false, error: result.error };
+    if (result.ok === false) return { ok: false, error: result.error };
     return { ok: true };
   });
 }

@@ -10,8 +10,11 @@ import type { TChatConversation } from '@/common/config/storage';
 import { Button, Dropdown, Input, Menu, Message, Modal } from '@arco-design/web-react';
 import {
   ChevronLeft,
+  CalendarClock,
   FolderMinus,
   FolderOpen,
+  History,
+  LayoutDashboard,
   MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
@@ -30,9 +33,12 @@ import ProjectFilesPanel from './components/ProjectFilesPanel';
 import ProjectSettingsDrawer, { type SettingsSection } from './components/ProjectSettingsDrawer';
 import ProjectReferencePanel from './components/ProjectReferencePanel';
 import ProjectMemoryPanel from './components/ProjectMemoryPanel';
+import ProjectHistoryPanel from './components/ProjectHistoryPanel';
+import ProjectCockpitPanel from './components/ProjectCockpitPanel';
+import ProjectReportsPanel from './components/ProjectReportsPanel';
 import styles from './components/projectCards.module.css';
 
-type ProjectTab = 'chats' | 'files' | 'reference' | 'memory';
+type ProjectTab = 'overview' | 'chats' | 'reports' | 'files' | 'reference' | 'memory' | 'history';
 
 /** Strip seeded heading/blockquote boilerplate to decide if instructions are real. */
 const hasContent = (raw: string): boolean =>
@@ -44,6 +50,14 @@ const hasContent = (raw: string): boolean =>
     })
     .join('')
     .trim().length > 0;
+
+const countReferenceFiles = (refs: unknown): number => {
+  if (Array.isArray(refs)) return refs.length;
+  if (refs && typeof refs === 'object' && Array.isArray((refs as { files?: unknown }).files)) {
+    return ((refs as { files: unknown[] }).files).length;
+  }
+  return 0;
+};
 
 /**
  * Per-project workspace. The umbrella view: every chat under this project plus a
@@ -60,10 +74,11 @@ const ProjectWorkspacePage: React.FC = () => {
   const [project, setProject] = useState<IProject | null>(null);
   const [conversations, setConversations] = useState<TChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ProjectTab>('chats');
+  const [activeTab, setActiveTab] = useState<ProjectTab>('overview');
 
   const [canGenerate, setCanGenerate] = useState(false);
   const [setupReady, setSetupReady] = useState(false);
+  const [referenceCount, setReferenceCount] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
 
   const load = useCallback(async () => {
@@ -82,6 +97,10 @@ const ProjectWorkspacePage: React.FC = () => {
       ]);
       setSetupReady(hasContent(knowledge.context || ''));
       setCanGenerate(!!hasModel);
+      const refs = await fetch(`/wl-project/reference?id=${encodeURIComponent(projectId)}`, { credentials: 'include' }).then(
+        async (response): Promise<unknown> => (response.ok ? response.json() : []),
+      );
+      setReferenceCount(countReferenceFiles(refs));
     } catch (err) {
       console.error('[ProjectWorkspacePage] load failed:', err);
     } finally {
@@ -165,60 +184,129 @@ const ProjectWorkspacePage: React.FC = () => {
 
   const openSettings = (section: SettingsSection) => setSettingsSection(section);
   const color = project?.iconColor || '#FF6A00';
+  const readinessMissingCount = [
+    !project?.workspace,
+    !setupReady,
+    referenceCount === 0,
+    !canGenerate,
+  ].filter(Boolean).length;
+  const readinessReady = project ? readinessMissingCount === 0 : false;
+  const setupLabel = readinessReady
+    ? 'Ready'
+    : t('projects.workspace.setupNeededCount', '{{count}} setup item', { count: readinessMissingCount });
+  const modelOnlyMissing = readinessMissingCount === 1 && !canGenerate;
+  const readinessDotStyle: React.CSSProperties = readinessReady
+    ? {
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        background: '#22c55e',
+        boxShadow: 'none',
+      }
+    : !project?.workspace
+      ? {
+          display: 'inline-block',
+          width: 8,
+          height: 8,
+          background: '#ef4444',
+          boxShadow: 'none',
+        }
+      : modelOnlyMissing
+        ? {
+            display: 'inline-block',
+            width: 8,
+            height: 8,
+            background: 'var(--color-text-3)',
+            boxShadow: 'none',
+          }
+        : {
+            display: 'inline-block',
+            width: 8,
+            height: 8,
+            background: 'linear-gradient(90deg, #f59e0b 0 50%, transparent 50% 100%)',
+            border: '1px solid #f59e0b',
+            boxShadow: 'none',
+          };
+  const openReadinessFix = () => {
+    if (!project?.workspace) {
+      openSettings('general');
+      return;
+    }
+    if (!setupReady) {
+      openSettings('context');
+      return;
+    }
+    if (referenceCount === 0) {
+      setActiveTab('reference');
+      return;
+    }
+    if (!canGenerate) Message.info(t('projects.cockpit.modelHint', 'Configure an AI provider before generating memory.'));
+  };
 
   const TABS: Array<{ key: ProjectTab; label: string; icon: React.ReactNode; count?: number }> = [
+    { key: 'overview', label: t('projects.workspace.tabOverview', 'Overview'), icon: <LayoutDashboard size={15} /> },
     { key: 'chats', label: t('projects.workspace.tabChats'), icon: <MessageSquare size={15} />, count: conversations.length },
+    { key: 'reports', label: t('projects.workspace.tabReports', 'Reports'), icon: <CalendarClock size={15} /> },
     { key: 'files', label: t('projects.workspace.tabFiles'), icon: <FolderOpen size={15} /> },
     { key: 'reference', label: t('projects.workspace.tabReference'), icon: <Paperclip size={15} /> },
     { key: 'memory', label: t('projects.workspace.tabMemory'), icon: <NotebookPen size={15} /> },
+    { key: 'history', label: t('projects.workspace.tabHistory', 'History'), icon: <History size={15} /> },
   ];
 
   return (
-    <div className='flex flex-col h-full w-full overflow-hidden'>
+    <div className={`flex flex-col h-full w-full overflow-hidden ${styles.workspace}`}>
       {/* Header */}
       <div
-        className='flex items-center gap-12px px-24px py-16px flex-shrink-0'
+        className={`flex items-center gap-12px px-24px py-16px flex-shrink-0 ${styles.workspaceHeader}`}
         style={{ borderBottom: '1px solid var(--color-border-2)' }}
       >
-        <Button type='text' shape='circle' icon={<ChevronLeft size={18} />} onClick={() => navigate('/projects')} />
+        <Button
+          type='text'
+          shape='circle'
+          className={styles.workspaceBackButton}
+          icon={<ChevronLeft size={18} />}
+          onClick={() => navigate('/projects')}
+        />
         <div
-          className='flex items-center justify-center w-36px h-36px rd-9px flex-shrink-0'
+          className={`flex items-center justify-center w-36px h-36px rd-9px flex-shrink-0 ${styles.workspaceIcon}`}
           style={{ background: `${color}1a`, color }}
         >
           <FolderOpen size={18} />
         </div>
-        <div className='flex flex-col gap-1px min-w-0 flex-1'>
+        <div className={`flex flex-col gap-1px min-w-0 flex-1 ${styles.workspaceTitleBlock}`}>
           <div className='text-16px font-700 text-t-primary truncate'>
             {project?.name || t('projects.workspace.loading')}
           </div>
           {project?.description && <div className='text-12px text-t-secondary truncate'>{project.description}</div>}
         </div>
 
-        {/* Setup readiness pill - opens Settings on Instructions */}
+        {/* Readiness pill rolls up the cockpit checklist. */}
         {project && (
           <button
             type='button'
-            onClick={() => openSettings('context')}
-            className='flex items-center gap-7px px-12px py-7px rd-full bg-transparent cursor-pointer text-12.5px font-600 transition-colors'
+            onClick={openReadinessFix}
+            className={`flex items-center gap-7px px-12px py-7px rd-full bg-transparent cursor-pointer text-12.5px font-600 transition-colors ${styles.workspaceSetupButton}`}
             style={{
               border: '1px solid var(--color-border-2)',
-              color: setupReady ? 'var(--color-success-6)' : 'var(--color-text-1)',
+              color: readinessReady ? 'var(--color-success-6)' : 'var(--color-text-1)',
             }}
           >
             <span
-              className='block w-8px h-8px rd-full'
-              style={{
-                background: setupReady ? 'var(--color-success-6)' : 'var(--color-primary-6)',
-                boxShadow: `0 0 0 3px ${setupReady ? 'var(--color-success-light-1)' : 'var(--color-primary-light-1)'}`,
-              }}
+              className='inline-block w-8px h-8px rd-full shrink-0'
+              style={{ minWidth: 8, minHeight: 8, ...readinessDotStyle }}
             />
-            {setupReady ? t('projects.workspace.setupDone') : t('projects.workspace.setupTodo')}
+            {setupLabel}
           </button>
         )}
-        <Button type='text' icon={<SettingsIcon size={15} />} onClick={() => openSettings('general')}>
+        <Button
+          type='text'
+          className={styles.workspaceSettingsButton}
+          icon={<SettingsIcon size={15} />}
+          onClick={() => openSettings('general')}
+        >
           {t('projects.workspace.settings')}
         </Button>
-        <Button type='primary' onClick={startNewChat}>
+        <Button type='primary' className={styles.workspaceNewChatButton} onClick={startNewChat}>
           <span className='flex items-center gap-6px'>
             <MessageSquarePlus size={16} />
             {t('projects.workspace.newChat')}
@@ -228,7 +316,7 @@ const ProjectWorkspacePage: React.FC = () => {
 
       {/* Tab bar */}
       <div
-        className='flex items-center gap-2px px-20px flex-shrink-0'
+        className={`flex items-center gap-2px px-20px flex-shrink-0 ${styles.workspaceTabs}`}
         style={{ borderBottom: '1px solid var(--color-border-2)' }}
       >
         {TABS.map((tab) => {
@@ -238,7 +326,7 @@ const ProjectWorkspacePage: React.FC = () => {
               key={tab.key}
               type='button'
               onClick={() => setActiveTab(tab.key)}
-              className='flex items-center gap-6px px-14px py-12px bg-transparent border-none cursor-pointer text-13px transition-colors'
+              className={`flex items-center gap-6px px-14px py-12px bg-transparent border-none cursor-pointer text-13px transition-colors ${styles.workspaceTabButton}`}
               style={{
                 color: active ? 'var(--color-text-1)' : 'var(--color-text-3)',
                 fontWeight: active ? 600 : 400,
@@ -258,8 +346,23 @@ const ProjectWorkspacePage: React.FC = () => {
 
       {/* Tab content */}
       <div className='flex-1 overflow-hidden'>
+        {activeTab === 'overview' && project && (
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+            <ProjectCockpitPanel
+              project={project}
+              projectId={projectId || ''}
+              conversations={conversations}
+              setupReady={setupReady}
+              canGenerate={canGenerate}
+              onNewChat={startNewChat}
+              onOpenSettings={openSettings}
+              onSelectTab={setActiveTab}
+            />
+          </div>
+        )}
+
         {activeTab === 'chats' && (
-          <div className='h-full overflow-auto px-24px py-16px'>
+          <div className={`h-full overflow-auto px-24px py-16px ${styles.workspaceScroll}`}>
             {!loading && conversations.length === 0 ? (
               <div className='flex flex-col items-center justify-center gap-16px h-full text-center'>
                 <div className='flex items-center justify-center w-56px h-56px rd-14px bg-fill-1 text-t-tertiary'>
@@ -278,8 +381,8 @@ const ProjectWorkspacePage: React.FC = () => {
               </div>
             ) : (
               <div className='flex flex-col gap-8px max-w-720px mx-auto'>
-                {[...conversations]
-                  .sort((a, b) => {
+                {conversations
+                  .toSorted((a, b) => {
                     const pa = (a.extra as { pinnedAt?: number } | undefined)?.pinnedAt ?? 0;
                     const pb = (b.extra as { pinnedAt?: number } | undefined)?.pinnedAt ?? 0;
                     return pb - pa;
@@ -361,6 +464,12 @@ const ProjectWorkspacePage: React.FC = () => {
           </div>
         )}
 
+        {activeTab === 'reports' && project && (
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+            <ProjectReportsPanel project={project} />
+          </div>
+        )}
+
         {activeTab === 'files' &&
           (project?.workspace ? (
             <div className='h-full'>
@@ -382,7 +491,7 @@ const ProjectWorkspacePage: React.FC = () => {
           ))}
 
         {activeTab === 'reference' && (
-          <div className='h-full overflow-auto px-24px py-18px'>
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
             <ProjectReferencePanel
               projectId={projectId || ''}
               hasWorkspace={!!project?.workspace}
@@ -392,12 +501,18 @@ const ProjectWorkspacePage: React.FC = () => {
         )}
 
         {activeTab === 'memory' && (
-          <div className='h-full overflow-auto px-24px py-18px'>
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
             <ProjectMemoryPanel
               projectId={projectId || ''}
               hasWorkspace={!!project?.workspace}
               onSetWorkspace={() => openSettings('general')}
             />
+          </div>
+        )}
+
+        {activeTab === 'history' && project && (
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+            <ProjectHistoryPanel project={project} conversations={conversations} />
           </div>
         )}
       </div>

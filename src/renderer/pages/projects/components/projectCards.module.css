@@ -24,3 +24,160 @@
   border-radius: 12px;
   background: var(--color-bg-2);
 }
+
+.workspace,
+.cockpit {
+  min-width: 0;
+}
+
+.workspaceHeader,
+.workspaceTabs,
+.workspaceScroll,
+.cockpitSectionHeader,
+.cockpitActions,
+.cockpitMetric {
+  min-width: 0;
+}
+
+.workspaceSetupButton {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.workspaceTabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.workspaceTabs::-webkit-scrollbar {
+  display: none;
+}
+
+.workspaceTabButton {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.cockpitHeaderAction {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 767px) {
+  .workspaceHeader {
+    display: grid !important;
+    grid-template-columns: 36px 40px minmax(0, 1fr);
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)) !important;
+  }
+
+  .workspaceBackButton {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .workspaceIcon {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .workspaceTitleBlock {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .workspaceSetupButton,
+  .workspaceSettingsButton,
+  .workspaceNewChatButton {
+    min-width: 0 !important;
+    height: 36px !important;
+  }
+
+  .workspaceSetupButton {
+    grid-column: 1 / span 2;
+    grid-row: 2;
+    width: 100%;
+    justify-content: center;
+    padding-inline: 10px !important;
+    white-space: normal;
+    line-height: 14px;
+  }
+
+  .workspaceSettingsButton {
+    grid-column: 3;
+    grid-row: 2;
+    width: 100%;
+    justify-content: center;
+    padding-inline: 8px !important;
+  }
+
+  .workspaceNewChatButton {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: 100%;
+    justify-content: center;
+    padding-inline: 10px !important;
+  }
+
+  .workspaceNewChatButton span,
+  .workspaceSettingsButton span {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspaceTabs {
+    padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)) !important;
+  }
+
+  .workspaceTabButton {
+    min-height: 42px;
+    padding: 10px 11px !important;
+    font-size: 12px !important;
+  }
+
+  .workspaceScroll {
+    padding: 14px max(12px, env(safe-area-inset-right)) 96px max(12px, env(safe-area-inset-left)) !important;
+  }
+
+  .cockpit {
+    width: 100%;
+    gap: 12px !important;
+  }
+
+  .cockpitMetrics {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .cockpitMetric {
+    border-radius: 10px;
+    padding: 12px !important;
+  }
+
+  .cockpitSectionHeader {
+    align-items: flex-start !important;
+    flex-direction: column;
+  }
+
+  .cockpitSectionTitle,
+  .cockpitHeaderAction {
+    width: 100%;
+  }
+
+  .cockpitHeaderAction {
+    justify-content: center;
+  }
+
+  .cockpitActions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .cockpitActions :global(.arco-btn) {
+    width: 100%;
+    justify-content: center;
+  }
+}
