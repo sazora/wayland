@@ -39,6 +39,11 @@
   min-width: 0;
 }
 
+.cockpitMetric {
+  width: 100%;
+  appearance: none;
+}
+
 .workspaceSetupButton {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -62,6 +67,18 @@
 
 .cockpitHeaderAction {
   flex: 0 0 auto;
+}
+
+.cockpitActionButton {
+  min-width: 0 !important;
+  padding-inline: 8px !important;
+}
+
+.cockpitActionButton :global(.arco-btn-content) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 767px) {

@@ -89,20 +89,25 @@ function jobMatchesProject(job: ReturnType<typeof useAllCronJobs>['jobs'][number
   return [project.id, project.name, project.workspace].filter(Boolean).some((token) => haystack.includes(String(token).toLowerCase()));
 }
 
-const Metric: React.FC<{ label: string; value: string | number; hint?: string; icon: React.ReactNode }> = ({
+const Metric: React.FC<{ label: string; value: string | number; hint?: string; icon: React.ReactNode; onClick: () => void }> = ({
   label,
   value,
   hint,
   icon,
+  onClick,
 }) => (
-  <div className={`flex items-start gap-12px px-14px py-13px ${styles.surface} ${styles.cockpitMetric}`}>
+  <button
+    type='button'
+    className={`flex cursor-pointer items-start gap-12px px-14px py-13px text-left ${styles.card} ${styles.cockpitMetric}`}
+    onClick={onClick}
+  >
     <div className='flex items-center justify-center w-32px h-32px rd-8px bg-fill-2 text-t-secondary'>{icon}</div>
     <div className='min-w-0 flex-1'>
       <div className='text-20px leading-24px font-700 text-t-primary'>{value}</div>
       <div className='text-12px font-600 text-t-secondary'>{label}</div>
       {hint && <div className='mt-2px text-11px text-t-tertiary truncate'>{hint}</div>}
     </div>
-  </div>
+  </button>
 );
 
 const ChecklistItem: React.FC<{ ok: boolean; label: string; action?: React.ReactNode }> = ({ ok, label, action }) => (
@@ -189,10 +194,32 @@ const ProjectCockpitPanel: React.FC<Props> = ({
   return (
     <div className={`mx-auto flex max-w-1180px flex-col gap-16px ${styles.cockpit}`}>
       <div className={`grid gap-12px md:grid-cols-4 ${styles.cockpitMetrics}`}>
-        <Metric label={t('projects.cockpit.metricChats', 'Chats')} value={conversations.length} hint={`${pinned} pinned`} icon={<MessageSquare size={17} />} />
-        <Metric label={t('projects.cockpit.metricReference', 'References')} value={referenceCount} icon={<Paperclip size={17} />} />
-        <Metric label={t('projects.cockpit.metricDecisions', 'Decisions')} value={decisionCount} icon={<NotebookPen size={17} />} />
-        <Metric label={t('projects.cockpit.metricReports', 'Reports')} value={projectJobs.length} hint={`${activeJobs} active`} icon={<CalendarClock size={17} />} />
+        <Metric
+          label={t('projects.cockpit.metricChats', 'Chats')}
+          value={conversations.length}
+          hint={`${pinned} pinned`}
+          icon={<MessageSquare size={17} />}
+          onClick={() => onSelectTab('chats')}
+        />
+        <Metric
+          label={t('projects.cockpit.metricReference', 'References')}
+          value={referenceCount}
+          icon={<Paperclip size={17} />}
+          onClick={() => onSelectTab('reference')}
+        />
+        <Metric
+          label={t('projects.cockpit.metricDecisions', 'Decisions')}
+          value={decisionCount}
+          icon={<NotebookPen size={17} />}
+          onClick={() => onSelectTab('memory')}
+        />
+        <Metric
+          label={t('projects.cockpit.metricReports', 'Reports')}
+          value={projectJobs.length}
+          hint={`${activeJobs} active`}
+          icon={<CalendarClock size={17} />}
+          onClick={() => onSelectTab('reports')}
+        />
       </div>
 
       <div className='grid gap-14px lg:grid-cols-[1.2fr_0.8fr]'>
@@ -285,14 +312,28 @@ const ProjectCockpitPanel: React.FC<Props> = ({
           </div>
         </div>
         <div className={`grid gap-10px md:grid-cols-6 ${styles.cockpitActions}`}>
-          <Button icon={<MessageSquarePlus size={14} />} onClick={onNewChat}>{t('projects.workspace.newChat')}</Button>
-          <Button icon={<Paperclip size={14} />} onClick={() => onSelectTab('reference')}>{t('projects.workspace.tabReference')}</Button>
-          <Button icon={<NotebookPen size={14} />} onClick={() => onSelectTab('memory')}>{t('projects.workspace.tabMemory')}</Button>
-          <Button icon={<History size={14} />} onClick={() => onSelectTab('history')}>{t('projects.workspace.tabHistory', 'History')}</Button>
-          <Button icon={<CalendarClock size={14} />} onClick={() => navigate(`/scheduled?projectId=${encodeURIComponent(project.id)}&projectName=${encodeURIComponent(project.name)}&prompt=${reportPrompt}`)}>
-            {t('projects.cockpit.scheduleReport', 'Schedule report')}
+          <Button className={styles.cockpitActionButton} icon={<MessageSquarePlus size={14} />} onClick={onNewChat}>
+            {t('projects.cockpit.actionChat', 'Chat')}
           </Button>
-          <Button icon={<Settings size={14} />} onClick={() => onOpenSettings('general')}>{t('projects.workspace.settings')}</Button>
+          <Button className={styles.cockpitActionButton} icon={<Paperclip size={14} />} onClick={() => onSelectTab('reference')}>
+            {t('projects.cockpit.actionRefs', 'Refs')}
+          </Button>
+          <Button className={styles.cockpitActionButton} icon={<NotebookPen size={14} />} onClick={() => onSelectTab('memory')}>
+            {t('projects.workspace.tabMemory')}
+          </Button>
+          <Button className={styles.cockpitActionButton} icon={<History size={14} />} onClick={() => onSelectTab('history')}>
+            {t('projects.workspace.tabHistory', 'History')}
+          </Button>
+          <Button
+            className={styles.cockpitActionButton}
+            icon={<CalendarClock size={14} />}
+            onClick={() => navigate(`/scheduled?projectId=${encodeURIComponent(project.id)}&projectName=${encodeURIComponent(project.name)}&prompt=${reportPrompt}`)}
+          >
+            {t('projects.cockpit.actionReport', 'Report')}
+          </Button>
+          <Button className={styles.cockpitActionButton} icon={<Settings size={14} />} onClick={() => onOpenSettings('general')}>
+            {t('projects.workspace.settings')}
+          </Button>
         </div>
         {project.workspace && (
           <div className='mt-12px flex items-center gap-8px text-12px text-t-tertiary'>
