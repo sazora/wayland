@@ -36,18 +36,15 @@ const PHONE_RE = /^\+?[0-9][0-9().\-\s]{6,}$/;
 const statePath = (workspace: string): string => path.join(workspace, WAYLAND_KNOWLEDGE_DIR, EA_FILE);
 
 const normalizeChannel = (value: ProjectCommunicationChannel): ProjectCommunicationChannel => {
-  if (value === 'rcs') return 'rcs';
-  if (value === 'sms') return 'sms';
-  if (value === 'imessage') return 'imessage';
-  return 'email';
+  return value === 'email' ? 'email' : 'sms';
 };
 
 const normalizeTarget = (channel: ProjectCommunicationChannel, value: string): string => {
   const target = value.trim();
   if (!target) throw new Error('Recipient is required');
   if (channel === 'email' && !EMAIL_RE.test(target)) throw new Error('Recipient email is not valid');
-  if ((channel === 'sms' || channel === 'rcs' || channel === 'imessage') && !PHONE_RE.test(target) && !EMAIL_RE.test(target)) {
-    throw new Error('Recipient must be a phone number or iMessage email address');
+  if (channel !== 'email' && !PHONE_RE.test(target)) {
+    throw new Error('Recipient must be a phone number for Twilio text messaging');
   }
   return target;
 };
@@ -90,12 +87,9 @@ function pickPlugin(channel: ProjectCommunicationChannel): BasePlugin | null {
     return plugins.find((plugin) => plugin.type === 'email-agentmail') ?? plugins.find((plugin) => plugin.type === 'email-imap') ?? null;
   }
   if (channel === 'sms') {
-    return plugins.find((plugin) => plugin.type === 'sms-twilio') ?? plugins.find((plugin) => plugin.type === 'bluebubbles') ?? plugins.find((plugin) => plugin.type === 'imessage') ?? null;
+    return plugins.find((plugin) => plugin.type === 'sms-twilio') ?? null;
   }
-  if (channel === 'rcs') {
-    return plugins.find((plugin) => plugin.type === 'bluebubbles') ?? plugins.find((plugin) => plugin.type === 'imessage') ?? null;
-  }
-  return plugins.find((plugin) => plugin.type === 'bluebubbles') ?? plugins.find((plugin) => plugin.type === 'imessage') ?? null;
+  return null;
 }
 
 export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
@@ -103,8 +97,6 @@ export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
   const has = (types: string[]): BasePlugin | undefined => plugins.find((plugin) => types.includes(plugin.type));
   const email = has(['email-agentmail', 'email-imap']);
   const twilioSms = has(['sms-twilio']);
-  const sms = twilioSms ?? has(['bluebubbles', 'imessage']);
-  const appleMessages = has(['bluebubbles', 'imessage']);
   return [
     {
       channel: 'email',
@@ -113,28 +105,12 @@ export function projectOutboundCapabilities(): ProjectOutboundCapability[] {
       note: email ? `Outbound email is available through ${email.type}.` : 'Configure AgentMail or IMAP/SMTP before sending external email.',
     },
     {
-      channel: 'imessage',
-      available: Boolean(appleMessages),
-      provider: appleMessages?.type,
-      note: appleMessages ? `iMessage is available through ${appleMessages.type}.` : 'Configure iMessage or BlueBubbles before sending Messages.',
-    },
-    {
       channel: 'sms',
-      available: Boolean(sms),
-      provider: sms?.type,
+      available: Boolean(twilioSms),
+      provider: twilioSms?.type,
       note: twilioSms
-        ? 'Business SMS is available through Twilio. US SMS may still require A2P 10DLC registration to avoid carrier filtering.'
-        : sms
-          ? `SMS can send through ${sms.type}. Apple Messages/BlueBubbles SMS still requires a paired iPhone with an active carrier line.`
-          : 'Configure Twilio for business SMS, or iMessage/BlueBubbles for Apple relay SMS.',
-    },
-    {
-      channel: 'rcs',
-      available: Boolean(appleMessages),
-      provider: appleMessages?.type,
-      note: appleMessages
-        ? 'RCS can only work through Apple Messages relay when the paired iPhone/carrier supports it.'
-        : 'RCS requires Apple Messages/BlueBubbles plus a paired iPhone/carrier that supports RCS.',
+        ? 'Business text messaging is available through Twilio. RCS requires Twilio RCS onboarding and a verified sender before WL can use it.'
+        : 'Configure Twilio before sending project text messages.',
     },
   ];
 }
@@ -257,7 +233,9 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
   if (message.requiresApproval && !message.approvedAt) throw new Error('Outbound message needs approval before sending');
   if (message.status === 'sent') return message;
 
-  const plugin = pickPlugin(message.channel);
+  const sendChannel = normalizeChannel(message.channel);
+  message.channel = sendChannel;
+  const plugin = pickPlugin(sendChannel);
   const now = Date.now();
   if (!plugin) {
     message.status = 'failed';
@@ -266,7 +244,7 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
     message.error =
       message.channel === 'email'
         ? 'No running email sender is configured. Enable AgentMail or IMAP/SMTP.'
-        : 'No running message sender is configured. Enable iMessage, BlueBubbles, or Twilio. SMS/RCS through Apple still requires a paired iPhone.';
+        : 'No running Twilio sender is configured. Project Assistant text messaging is Twilio-only.';
     await writeState(workspace, state);
     return message;
   }
@@ -274,7 +252,7 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
   try {
     const providerMessageId = await plugin.sendMessage(message.to, {
       type: 'text',
-      text: formatProjectOutboundBody(message.channel, message.body),
+      text: formatProjectOutboundBody(sendChannel, message.body),
       subject: message.subject,
     });
     message.status = 'sent';

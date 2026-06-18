@@ -25,9 +25,7 @@ type Props = {
 
 const CHANNEL_OPTIONS: Array<{ label: string; value: ProjectCommunicationChannel }> = [
   { label: 'Email', value: 'email' },
-  { label: 'iMessage', value: 'imessage' },
-  { label: 'SMS', value: 'sms' },
-  { label: 'RCS', value: 'rcs' },
+  { label: 'Text (Twilio)', value: 'sms' },
 ];
 
 const defaultState: ProjectExecutiveAssistantState = { contacts: [], outbound: [] };
@@ -38,12 +36,15 @@ const channelIcon = (channel: ProjectCommunicationChannel): React.ReactNode => {
   return <MessageSquareText size={14} />;
 };
 
+const normalizeComposerChannel = (channel: ProjectCommunicationChannel): ProjectCommunicationChannel => {
+  return channel === 'email' ? 'email' : 'sms';
+};
+
 export const resolveContactDestination = (
   contact: Pick<ProjectContact, 'email' | 'phone'>,
   channel: ProjectCommunicationChannel,
 ): string => {
   if (channel === 'email') return contact.email || '';
-  if (channel === 'imessage') return contact.phone || contact.email || '';
   return contact.phone || '';
 };
 
@@ -107,7 +108,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
 
   useEffect(() => {
     if (!selectedContact) return;
-    const channel = selectedContact.preferredChannel;
+    const channel = normalizeComposerChannel(selectedContact.preferredChannel);
     setMessageDraft((current) => ({
       ...current,
       channel,
@@ -116,10 +117,11 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
   }, [selectedContact]);
 
   const updateMessageChannel = (channel: ProjectCommunicationChannel) => {
+    const normalizedChannel = normalizeComposerChannel(channel);
     setMessageDraft((draft) => ({
       ...draft,
-      channel,
-      to: selectedContact ? resolveContactDestination(selectedContact, channel) : draft.to,
+      channel: normalizedChannel,
+      to: selectedContact ? resolveContactDestination(selectedContact, normalizedChannel) : draft.to,
     }));
   };
 

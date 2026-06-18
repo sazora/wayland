@@ -89,4 +89,23 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(formatProjectOutboundBody('imessage', 'Checking in on the file.')).toBe('Checking in on the file.');
     expect(formatProjectOutboundBody('rcs', 'Checking in on the file.')).toBe('Checking in on the file.');
   });
+
+  it('normalizes legacy iMessage and RCS outbound drafts to Twilio text', async () => {
+    const imessageContact = await createProjectContact(ws, {
+      name: 'Legacy iMessage Contact',
+      phone: '+14125550123',
+      preferredChannel: 'imessage',
+      approved: true,
+    });
+    expect(imessageContact.preferredChannel).toBe('sms');
+
+    const outbound = await createProjectOutbound(ws, {
+      contactId: imessageContact.id,
+      channel: 'rcs',
+      to: '+14125550123',
+      body: 'Text through Twilio.',
+    });
+
+    expect(outbound.channel).toBe('sms');
+  });
 });

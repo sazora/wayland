@@ -11,12 +11,12 @@ describe('resolveContactDestination', () => {
     expect(resolveContactDestination(contact, 'email')).toBe('seth@example.com');
   });
 
-  it('uses the phone number for iMessage when one is available', () => {
+  it('uses the phone number for legacy iMessage contacts', () => {
     expect(resolveContactDestination(contact, 'imessage')).toBe('+14127087088');
   });
 
-  it('falls back to email for iMessage contacts without a phone number', () => {
-    expect(resolveContactDestination({ email: 'seth@example.com' }, 'imessage')).toBe('seth@example.com');
+  it('does not use email fallback for text messages', () => {
+    expect(resolveContactDestination({ email: 'seth@example.com' }, 'imessage')).toBe('');
   });
 
   it('uses phone numbers only for SMS and RCS', () => {
