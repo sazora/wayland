@@ -7,7 +7,7 @@
 import type { TChatConversation } from '@/common/config/storage';
 import type { IProject } from '@/common/types/project';
 import { Button } from '@arco-design/web-react';
-import { Ban, Clock3, DownloadCloud, FileText, Mail, MessageSquare } from 'lucide-react';
+import { ArrowRight, Ban, Clock3, DownloadCloud, FileText, Mail, MessageSquare } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './projectCards.module.css';
@@ -48,9 +48,13 @@ type HistoryItem = {
   kind: HistoryKind;
   time?: number;
   title: string;
+  eyebrow: string;
+  summary: string;
   detail?: string;
   meta?: string;
+  related: Array<{ label: string; value: string }>;
   target?: string;
+  targetLabel?: string;
 };
 
 const normalizeTime = (value?: number): number | undefined => {
@@ -80,6 +84,11 @@ const compact = (values: Array<string | number | undefined | null | false>): str
     .filter((value): value is string | number => value !== undefined && value !== null && value !== false && value !== '')
     .map(String)
     .join(' · ');
+
+const subjectLabel = (subject: string | undefined): string => subject?.trim() || 'No subject';
+
+const fileCountLabel = (count: number, singular: string, plural = `${singular}s`): string =>
+  `${count} ${count === 1 ? singular : plural}`;
 
 async function parseReferenceResponse(response: Response): Promise<ReferenceFile[]> {
   const json = await response.json().catch((): null => null);
@@ -116,7 +125,12 @@ function buildHistoryItems(
     kind: 'project',
     time: normalizeTime(project.createTime),
     title: 'Project created',
+    eyebrow: 'Project',
+    summary: `${project.name} was created as a Wayland project. This is the start of the project timeline.`,
     detail: project.name,
+    related: compact([project.workspace ? `Workspace: ${project.workspace}` : undefined])
+      ? [{ label: 'Project', value: project.workspace ? `${project.name} · ${project.workspace}` : project.name }]
+      : [{ label: 'Project', value: project.name }],
   });
 
   const projectModified = normalizeTime(project.modifyTime);
@@ -126,20 +140,31 @@ function buildHistoryItems(
       kind: 'project',
       time: projectModified,
       title: 'Project updated',
+      eyebrow: 'Project',
+      summary: `${project.name} changed after creation. This usually means project settings, metadata, workspace, or attached project state was updated.`,
       detail: project.name,
+      related: [{ label: 'Project', value: project.name }],
     });
   }
 
   for (const conversation of conversations) {
     const backend = (conversation.extra as { backend?: string } | undefined)?.backend || conversation.type;
+    const title = conversation.name || 'Untitled chat';
     items.push({
       id: `chat-${conversation.id}`,
       kind: 'chat',
       time: normalizeTime(conversation.modifyTime ?? conversation.createTime),
-      title: conversation.name || 'Untitled chat',
+      title,
+      eyebrow: 'Chat',
+      summary: `A project chat titled "${title}" was active. History can identify when the chat was touched and which backend it used; open the chat for the full transcript and decisions.`,
       detail: backend,
       meta: 'Chat',
+      related: compact([backend, conversation.type]).split(' · ').map((value, index) => ({
+        label: index === 0 ? 'Backend' : 'Type',
+        value,
+      })),
       target: `/conversation/${conversation.id}`,
+      targetLabel: 'Open chat',
     });
   }
 
@@ -148,21 +173,34 @@ function buildHistoryItems(
     const remoteLinks = record.remoteAttachmentLinks ?? [];
     const importedRemote = remoteLinks.filter((link) => link.status === 'saved').length;
     const ignoredRemote = remoteLinks.filter((link) => link.status === 'ignored').length;
+    const savedReferenceCount = record.referenceFiles?.length ?? 0;
+    const emailTitle = subjectLabel(record.subject);
+    const emailMeta = compact([
+      record.status !== 'saved' ? record.status : undefined,
+      record.attachmentCount ? fileCountLabel(record.attachmentCount, 'attachment') : undefined,
+      savedReferenceCount ? fileCountLabel(savedReferenceCount, 'reference') : undefined,
+      remoteLinks.length ? `${remoteLinks.length} remote` : undefined,
+      importedRemote ? `${importedRemote} imported` : undefined,
+      ignoredRemote ? `${ignoredRemote} excluded` : undefined,
+    ]);
 
     items.push({
       id: `email-${record.id}`,
       kind: 'email',
       time: receivedAt,
-      title: record.subject || 'Project email ingested',
+      title: emailTitle,
+      eyebrow: 'Email ingest',
+      summary: `WL received this project email${record.from ? ` from ${record.from}` : ''}. It ${record.status === 'saved' ? 'saved the ingest record' : `ended with status "${record.status}"`}${savedReferenceCount ? ` and added ${fileCountLabel(savedReferenceCount, 'reference')} to the project` : ''}${remoteLinks.length ? ` while capturing ${remoteLinks.length} remote attachment link${remoteLinks.length === 1 ? '' : 's'}` : ''}.`,
       detail: record.from ? `From ${record.from}` : undefined,
-      meta: compact([
-        record.status !== 'saved' ? record.status : undefined,
-        record.attachmentCount ? `${record.attachmentCount} attachment${record.attachmentCount === 1 ? '' : 's'}` : undefined,
-        record.referenceFiles?.length ? `${record.referenceFiles.length} reference${record.referenceFiles.length === 1 ? '' : 's'}` : undefined,
-        remoteLinks.length ? `${remoteLinks.length} remote` : undefined,
-        importedRemote ? `${importedRemote} imported` : undefined,
-        ignoredRemote ? `${ignoredRemote} excluded` : undefined,
-      ]),
+      meta: emailMeta,
+      related: [
+        ...(record.from ? [{ label: 'From', value: record.from }] : []),
+        { label: 'Status', value: record.status },
+        ...(record.attachmentCount ? [{ label: 'Attachments', value: String(record.attachmentCount) }] : []),
+        ...(savedReferenceCount ? [{ label: 'References saved', value: String(savedReferenceCount) }] : []),
+        ...(remoteLinks.length ? [{ label: 'Remote links', value: String(remoteLinks.length) }] : []),
+        ...(record.reason ? [{ label: 'Reason', value: record.reason }] : []),
+      ],
     });
 
     for (const fileName of record.referenceFiles ?? []) {
@@ -172,8 +210,15 @@ function buildHistoryItems(
         kind: 'reference',
         time: receivedAt,
         title: 'Reference saved from email',
+        eyebrow: 'Reference',
+        summary: `WL saved "${fileName}" from the email "${emailTitle}". This file is now part of the project reference set and can be used as context in project chats.`,
         detail: fileName,
         meta: record.subject,
+        related: [
+          { label: 'File', value: fileName },
+          { label: 'Source email', value: emailTitle },
+          ...(record.from ? [{ label: 'From', value: record.from }] : []),
+        ],
       });
     }
 
@@ -186,8 +231,16 @@ function buildHistoryItems(
           kind: 'remote-import',
           time: normalizeTime(link.downloadedAt) ?? receivedAt,
           title: 'Remote attachment imported',
+          eyebrow: 'Remote attachment',
+          summary: `A Mail Drop or remote attachment link from "${emailTitle}" was imported into project references${link.savedReferenceFile ? ` as "${link.savedReferenceFile}"` : ''}.`,
           detail: label,
           meta: compact([link.size, fmtSize(link.bytes), record.subject]),
+          related: [
+            { label: 'Attachment', value: label },
+            { label: 'Source email', value: emailTitle },
+            ...(link.size ? [{ label: 'Reported size', value: link.size }] : []),
+            ...(fmtSize(link.bytes) ? [{ label: 'Downloaded size', value: fmtSize(link.bytes)! }] : []),
+          ],
         });
       }
       if (link.status === 'ignored') {
@@ -196,8 +249,15 @@ function buildHistoryItems(
           kind: 'remote-ignore',
           time: normalizeTime(link.ignoredAt) ?? receivedAt,
           title: 'Remote attachment excluded',
+          eyebrow: 'Remote attachment',
+          summary: `A captured remote attachment from "${emailTitle}" was intentionally excluded. It remains recorded in history, but it will not sit in the pending remote attachment queue.`,
           detail: label,
           meta: compact([link.size, record.subject]),
+          related: [
+            { label: 'Attachment', value: label },
+            { label: 'Source email', value: emailTitle },
+            ...(link.size ? [{ label: 'Reported size', value: link.size }] : []),
+          ],
         });
       }
     });
@@ -209,8 +269,14 @@ function buildHistoryItems(
       id: `inventory-${reference.name}`,
       kind: 'inventory',
       title: 'Reference available',
+      eyebrow: 'Reference',
+      summary: `"${reference.name}" is currently available in the project reference folder. WL does not have a reliable event timestamp for when this file was originally added, so it is shown after timed events.`,
       detail: reference.name,
       meta: fmtSize(reference.size),
+      related: [
+        { label: 'File', value: reference.name },
+        ...(fmtSize(reference.size) ? [{ label: 'Size', value: fmtSize(reference.size)! }] : []),
+      ],
     });
   }
 
@@ -225,6 +291,7 @@ const ProjectHistoryPanel: React.FC<{
   const [emailHistory, setEmailHistory] = useState<EmailIngestRecord[]>([]);
   const [references, setReferences] = useState<ReferenceFile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const hasWorkspace = Boolean(project.workspace);
 
   const load = useCallback(async () => {
@@ -260,6 +327,18 @@ const ProjectHistoryPanel: React.FC<{
     [project, conversations, emailHistory, references],
   );
 
+  useEffect(() => {
+    if (items.length === 0) {
+      if (selectedId) setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !items.some((item) => item.id === selectedId)) {
+      setSelectedId(items[0].id);
+    }
+  }, [items, selectedId]);
+
+  const selected = items.find((item) => item.id === selectedId) ?? items[0];
+
   const stats = useMemo(
     () => ({
       chats: conversations.length,
@@ -289,45 +368,83 @@ const ProjectHistoryPanel: React.FC<{
         </div>
       </div>
 
-      <div className={`flex flex-col ${styles.surface}`}>
-        {items.map((item, index) => {
-          const clickable = Boolean(item.target);
-          const body = (
-            <>
-              <div className='flex h-32px w-32px shrink-0 items-center justify-center rd-8px bg-fill-2 text-t-secondary'>
-                {iconFor(item.kind)}
+      <div className='grid gap-14px lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,1.05fr)]'>
+        <div className={`flex flex-col ${styles.surface}`}>
+          {items.map((item, index) => {
+            const active = selected?.id === item.id;
+            return (
+              <button
+                key={item.id}
+                type='button'
+                className='flex w-full cursor-pointer items-start gap-12px border-none bg-transparent px-14px py-12px text-left transition-colors hover:bg-fill-1'
+                style={{
+                  borderTop: index === 0 ? undefined : '1px solid var(--color-border-2)',
+                  background: active ? 'var(--color-primary-light-1)' : undefined,
+                }}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <div
+                  className='flex h-32px w-32px shrink-0 items-center justify-center rd-8px'
+                  style={{
+                    background: active ? 'rgb(var(--primary-6) / 0.14)' : 'var(--color-fill-2)',
+                    color: active ? 'rgb(var(--primary-6))' : 'var(--color-text-2)',
+                  }}
+                >
+                  {iconFor(item.kind)}
+                </div>
+                <div className='min-w-0 flex-1'>
+                  <div className='text-10px font-700 uppercase text-t-tertiary'>{item.eyebrow}</div>
+                  <div className='mt-1px flex flex-wrap items-center gap-x-8px gap-y-2px'>
+                    <span className='text-13px font-600 text-t-primary'>{item.title}</span>
+                    <span className='text-11px text-t-tertiary'>{fmtTime(item.time)}</span>
+                  </div>
+                  {item.detail && <div className='mt-2px truncate text-12px text-t-secondary'>{item.detail}</div>}
+                  {item.meta && <div className='mt-2px truncate text-11px text-t-tertiary'>{item.meta}</div>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {selected && (
+          <aside className={`flex min-h-320px flex-col gap-14px p-16px ${styles.surface}`} data-wl-history-detail='true'>
+            <div className='flex items-start gap-12px'>
+              <div className='flex h-36px w-36px shrink-0 items-center justify-center rd-9px bg-fill-2 text-t-secondary'>
+                {iconFor(selected.kind)}
               </div>
               <div className='min-w-0 flex-1'>
-                <div className='flex flex-wrap items-center gap-x-8px gap-y-2px'>
-                  <span className='text-13px font-650 text-t-primary'>{item.title}</span>
-                  <span className='text-11px text-t-tertiary'>{fmtTime(item.time)}</span>
-                </div>
-                {item.detail && <div className='mt-2px truncate text-12px text-t-secondary'>{item.detail}</div>}
-                {item.meta && <div className='mt-2px truncate text-11px text-t-tertiary'>{item.meta}</div>}
+                <div className='text-10px font-700 uppercase text-t-tertiary'>{selected.eyebrow}</div>
+                <h2 className='m-0 mt-2px text-16px font-700 leading-22px text-t-primary'>{selected.title}</h2>
+                <div className='mt-3px text-12px text-t-tertiary'>{fmtTime(selected.time)}</div>
               </div>
-            </>
-          );
-
-          return clickable ? (
-            <button
-              key={item.id}
-              type='button'
-              className='flex w-full cursor-pointer items-start gap-12px border-none bg-transparent px-14px py-12px text-left transition-colors hover:bg-fill-1'
-              style={{ borderTop: index === 0 ? undefined : '1px solid var(--color-border-2)' }}
-              onClick={() => item.target && navigate(item.target)}
-            >
-              {body}
-            </button>
-          ) : (
-            <div
-              key={item.id}
-              className='flex items-start gap-12px px-14px py-12px'
-              style={{ borderTop: index === 0 ? undefined : '1px solid var(--color-border-2)' }}
-            >
-              {body}
             </div>
-          );
-        })}
+
+            <div>
+              <div className='mb-5px text-12px font-700 text-t-primary'>Summary</div>
+              <p className='m-0 text-13px leading-20px text-t-secondary'>{selected.summary}</p>
+            </div>
+
+            {selected.related.length > 0 && (
+              <div className='flex flex-col gap-7px'>
+                <div className='text-12px font-700 text-t-primary'>Related</div>
+                {selected.related.map((row) => (
+                  <div key={`${row.label}:${row.value}`} className='flex items-start gap-10px text-12px'>
+                    <span className='w-96px shrink-0 text-t-tertiary'>{row.label}</span>
+                    <span className='min-w-0 flex-1 break-words text-t-secondary'>{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {selected.target && (
+              <div className='mt-auto flex justify-end'>
+                <Button type='primary' size='small' icon={<ArrowRight size={13} />} onClick={() => navigate(selected.target!)}>
+                  {selected.targetLabel || 'Open'}
+                </Button>
+              </div>
+            )}
+          </aside>
+        )}
       </div>
 
       {!hasWorkspace && (
