@@ -12,7 +12,9 @@ import {
   approveProjectOutbound,
   createProjectContact,
   createProjectOutbound,
+  formatProjectOutboundBody,
   readProjectExecutiveAssistant,
+  SMS_OUTBOUND_ONLY_NOTICE,
   sendProjectOutbound,
 } from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
 
@@ -71,5 +73,20 @@ describe('ProjectExecutiveAssistantService', () => {
     const failed = await sendProjectOutbound(ws, outbound.id);
     expect(failed.status).toBe('failed');
     expect(failed.error).toContain('No running email sender');
+  });
+
+  it('adds the no-inbound-replies notice to Project Assistant SMS bodies', () => {
+    expect(formatProjectOutboundBody('sms', 'Checking in on the file.')).toBe(
+      `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`,
+    );
+  });
+
+  it('does not duplicate the no-inbound-replies notice or add it to other channels', () => {
+    const smsBody = `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`;
+
+    expect(formatProjectOutboundBody('sms', smsBody)).toBe(smsBody);
+    expect(formatProjectOutboundBody('email', 'Checking in on the file.')).toBe('Checking in on the file.');
+    expect(formatProjectOutboundBody('imessage', 'Checking in on the file.')).toBe('Checking in on the file.');
+    expect(formatProjectOutboundBody('rcs', 'Checking in on the file.')).toBe('Checking in on the file.');
   });
 });

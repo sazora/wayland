@@ -23,6 +23,7 @@ import { WAYLAND_KNOWLEDGE_DIR } from '@process/services/projectKnowledge/bootst
 
 const EA_FILE = 'executive-assistant.json';
 const MAX_OUTBOUND_RECORDS = 500;
+export const SMS_OUTBOUND_ONLY_NOTICE = 'Note: This number cannot receive inbound messages.';
 
 const DEFAULT_STATE: ProjectExecutiveAssistantState = {
   contacts: [],
@@ -49,6 +50,13 @@ const normalizeTarget = (channel: ProjectCommunicationChannel, value: string): s
     throw new Error('Recipient must be a phone number or iMessage email address');
   }
   return target;
+};
+
+export const formatProjectOutboundBody = (channel: ProjectCommunicationChannel, body: string): string => {
+  const trimmed = body.trim();
+  if (channel !== 'sms') return trimmed;
+  if (trimmed.includes(SMS_OUTBOUND_ONLY_NOTICE)) return trimmed;
+  return `${trimmed}\n\n${SMS_OUTBOUND_ONLY_NOTICE}`;
 };
 
 const normalizeState = (raw: Partial<ProjectExecutiveAssistantState> | null | undefined): ProjectExecutiveAssistantState => ({
@@ -266,7 +274,7 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
   try {
     const providerMessageId = await plugin.sendMessage(message.to, {
       type: 'text',
-      text: message.body,
+      text: formatProjectOutboundBody(message.channel, message.body),
       subject: message.subject,
     });
     message.status = 'sent';
