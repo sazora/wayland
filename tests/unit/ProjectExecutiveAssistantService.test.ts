@@ -10,6 +10,7 @@ import os from 'os';
 import path from 'path';
 import {
   approveProjectOutbound,
+  clearProjectOutbound,
   createProjectContact,
   createProjectOutbound,
   formatProjectOutboundBody,
@@ -107,5 +108,28 @@ describe('ProjectExecutiveAssistantService', () => {
     });
 
     expect(outbound.channel).toBe('sms');
+  });
+
+  it('clears outbound history without removing project contacts', async () => {
+    const contact = await createProjectContact(ws, {
+      name: 'Seth Zora',
+      email: 'seth@example.com',
+      phone: '+14127087088',
+      preferredChannel: 'sms',
+      approved: true,
+    });
+    await createProjectOutbound(ws, {
+      contactId: contact.id,
+      channel: 'sms',
+      to: '+14127087088',
+      body: 'Test',
+    });
+
+    const cleared = await clearProjectOutbound(ws);
+
+    expect(cleared.contacts).toHaveLength(1);
+    expect(cleared.contacts[0]?.id).toBe(contact.id);
+    expect(cleared.outbound).toEqual([]);
+    await expect(sendProjectOutbound(ws, 'missing-after-clear')).rejects.toThrow('Outbound message not found');
   });
 });

@@ -12,8 +12,8 @@ import type {
   ProjectOutboundCapability,
   ProjectOutboundMessage,
 } from '@/common/types/projectExecutiveAssistant';
-import { Button, Checkbox, Input, Message, Select } from '@arco-design/web-react';
-import { Check, Mail, MessageSquareText, Phone, Send, UserPlus, X } from 'lucide-react';
+import { Button, Checkbox, Input, Message, Modal, Select } from '@arco-design/web-react';
+import { Check, Mail, MessageSquareText, Phone, Send, Trash2, UserPlus, X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styles from './projectCards.module.css';
 
@@ -188,6 +188,24 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
     await load();
   };
 
+  const clearOutbox = () => {
+    Modal.confirm({
+      title: 'Clear Assistant outbox?',
+      content: 'This removes every draft, sent, failed, and cancelled Assistant outbox entry for this project. Contacts stay saved.',
+      okText: 'Clear outbox',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const nextState = await ipcBridge.project.clearOutbound.invoke({ id: projectId });
+          setState(nextState);
+          Message.success('Assistant outbox cleared');
+        } catch (err) {
+          Message.error(err instanceof Error ? err.message : 'Failed to clear Assistant outbox');
+        }
+      },
+    });
+  };
+
   if (!hasWorkspace) {
     return (
       <div className='mx-auto flex max-w-720px flex-col items-center gap-12px text-center'>
@@ -354,9 +372,21 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
             <h2 className='m-0 text-14px font-700 text-t-primary'>Assistant outbox</h2>
             <p className='m-0 mt-2px text-12px text-t-secondary'>Drafts, approvals, sends, failures, and cancelled messages.</p>
           </div>
-          <Button size='small' type='text' onClick={() => void load()}>
-            Refresh
-          </Button>
+          <div className='flex items-center gap-6px'>
+            <Button
+              size='small'
+              type='text'
+              status='danger'
+              icon={<Trash2 size={13} />}
+              disabled={state.outbound.length === 0}
+              onClick={clearOutbox}
+            >
+              Clear
+            </Button>
+            <Button size='small' type='text' onClick={() => void load()}>
+              Refresh
+            </Button>
+          </div>
         </div>
         <div className='flex flex-col gap-8px'>
           {state.outbound.map((message) => (

@@ -226,6 +226,13 @@ export async function cancelProjectOutbound(workspace: string, messageId: string
   return message;
 }
 
+export async function clearProjectOutbound(workspace: string): Promise<ProjectExecutiveAssistantState> {
+  const state = await readState(workspace);
+  state.outbound = [];
+  await writeState(workspace, state);
+  return state;
+}
+
 export async function sendProjectOutbound(workspace: string, messageId: string): Promise<ProjectOutboundMessage> {
   const state = await readState(workspace);
   const message = state.outbound.find((item) => item.id === messageId);

@@ -2613,6 +2613,7 @@ export const project = {
   ),
   approveOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.approve-outbound'),
   cancelOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.cancel-outbound'),
+  clearOutbound: buildProvider<ProjectExecutiveAssistantState, { id: string }>('project.clear-outbound'),
   sendOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.send-outbound'),
   /**
    * Fired whenever the project list or a project's membership changes.

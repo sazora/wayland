@@ -27,6 +27,7 @@ import {
 import {
   approveProjectOutbound,
   cancelProjectOutbound,
+  clearProjectOutbound,
   createProjectContact,
   createProjectOutbound,
   projectOutboundCapabilities,
@@ -356,6 +357,11 @@ export function initProjectBridge(): void {
   ipcBridge.project.cancelOutbound.provider(async ({ id, messageId }) => {
     const workspace = await requireWorkspace(id);
     return cancelProjectOutbound(workspace, messageId);
+  });
+
+  ipcBridge.project.clearOutbound.provider(async ({ id }) => {
+    const workspace = await requireWorkspace(id);
+    return clearProjectOutbound(workspace);
   });
 
   ipcBridge.project.sendOutbound.provider(async ({ id, messageId }) => {
