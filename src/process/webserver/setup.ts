@@ -41,8 +41,8 @@ const CSRF_SECRET = getCsrfSecret();
  */
 export function setupBasicMiddleware(app: Express): void {
   // Body parsers
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '35mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '35mb' }));
 
   // CSRF Protection using tiny-csrf (CodeQL compliant)
   // Must be applied after cookieParser and before routes.
@@ -57,7 +57,7 @@ export function setupBasicMiddleware(app: Express): void {
     csrf(
       CSRF_SECRET,
       ['POST', 'PUT', 'DELETE', 'PATCH'], // Protected methods
-      ['/login', '/api/auth/qr-login', '/channels/wecom/webhook'], // Excluded: login form, QR login, WeCom server callback (signed by WeCom)
+      ['/login', '/api/auth/qr-login', '/channels/wecom/webhook', '/api/project-email-intake/cloudflare'], // Excluded: browser login flows plus signed/secret server callbacks
       [] // No service worker URLs
     )
   );

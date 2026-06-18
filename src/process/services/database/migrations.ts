@@ -2184,6 +2184,41 @@ const migration_v49: IMigration = {
 };
 
 /**
+ * Migration v49 -> v50: Project email intake settings.
+ *
+ * Each project can reserve a stable local-part alias for `alias@wl.cksz.us`.
+ * The inbound Cloudflare Worker stays static/catch-all; WL owns alias routing
+ * and sender policy here so users never manage aliases in Cloudflare manually.
+ */
+const migration_v50: IMigration = {
+  version: 50,
+  name: 'Add project email intake settings',
+  up: (db) => {
+    const cols = new Set((db.pragma('table_info(projects)') as Array<{ name: string }>).map((c) => c.name));
+    if (!cols.has('email_alias')) {
+      db.exec('ALTER TABLE projects ADD COLUMN email_alias TEXT');
+    }
+    if (!cols.has('email_intake_enabled')) {
+      db.exec('ALTER TABLE projects ADD COLUMN email_intake_enabled INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!cols.has('email_allowed_senders')) {
+      db.exec("ALTER TABLE projects ADD COLUMN email_allowed_senders TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!cols.has('email_ingest_behavior')) {
+      db.exec("ALTER TABLE projects ADD COLUMN email_ingest_behavior TEXT NOT NULL DEFAULT 'save'");
+    }
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_email_alias ON projects(email_alias) WHERE email_alias IS NOT NULL'
+    );
+    console.log('[Migration v50] Added project email intake settings');
+  },
+  down: (db) => {
+    db.exec('DROP INDEX IF EXISTS idx_projects_email_alias');
+    console.log('[Migration v50] Rollback skipped: project email intake columns are safe to leave.');
+  },
+};
+
+/**
  * All migrations in order
  */
 // prettier-ignore
@@ -2196,7 +2231,7 @@ export const ALL_MIGRATIONS: IMigration[] = [
   migration_v31, migration_v32, migration_v33, migration_v34, migration_v35, migration_v36,
   migration_v37, migration_v38, migration_v39, migration_v40, migration_v41, migration_v42,
   migration_v43, migration_v44, migration_v45, migration_v46, migration_v47,
-  migration_v48, migration_v49,
+  migration_v48, migration_v49, migration_v50,
 ];
 
 /**

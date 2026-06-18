@@ -35,13 +35,30 @@ import type { ConnectFluxResult, ConnectPastedKeyResult } from '../types/onboard
 import type { ProtocolDetectionRequest, ProtocolDetectionResponse } from '../utils/protocolDetector';
 import type { SpeechToTextRequest, SpeechToTextResult } from '../types/speech';
 import type { DownloadResult, VoiceAsset } from '../types/voiceAsset';
-import type { SkillSecurityReport, SkillIndexEntry, SkillSource, SkillVerdict } from '../types/skillTypes';
+import type { SkillSecurityReport, SkillIndexEntry, SkillSource, SkillType, SkillVerdict } from '../types/skillTypes';
+import type {
+  LetterlyNoteSummary,
+  MeetingAutomationResult,
+  MeetingInteractionRecord,
+  MeetingMarkSummaryIngestedRequest,
+  MeetingSendRequest,
+  MeetingSummaryRequest,
+  MeetingSummaryResponse,
+  MeetingsListRequest,
+  MeetingsListResponse,
+  MeetingsSaveSettingsRequest,
+  MeetingsSettingsPublic,
+  MeetingDeliveryRecord,
+} from '../types/meetings';
+import type { ProjectEmailIngestRecord } from '../../process/services/projectEmailIntake/ProjectEmailIntakeService';
 import type { ImportResult } from '../../process/services/skills/SkillImport';
 import type { KickoffResult, KickoffTelemetryEvent } from '../../process/services/kickoff/types';
 import type {
   AskRecord,
   ResolvedSkill,
   StepStatus,
+  StepTransitionSource,
+  WorkflowDraftStep,
   WorkflowSession,
   WorkflowSessionStatus,
 } from '../types/workflowTypes';
@@ -440,9 +457,13 @@ export const skills = {
   build: {
     /**
      * Draft a SKILL.md from a plain-text description.
-     * TODO: wire to real model call; currently returns a deterministic template.
+     * Returns metadata when a workflow draft can infer a sensible name,
+     * description, category, and tags from the prompt.
      */
-    draft: buildProvider<{ skillMd: string }, { description: string }>('skills.build.draft'),
+    draft: buildProvider<
+      { skillMd: string; name?: string; description?: string; category?: string; tags?: string[] },
+      { description: string; type?: SkillType }
+    >('skills.build.draft'),
   },
   /**
    * Write a new SKILL.md to ~/.wayland/skills/<kebab-name>/SKILL.md,
@@ -450,7 +471,7 @@ export const skills = {
    */
   save: buildProvider<
     { name: string; verdict: SkillVerdict; quarantinedAt?: string },
-    { name: string; description: string; category: string; tags: string[]; body: string }
+    { name: string; description: string; category: string; tags: string[]; body: string; type?: SkillType }
   >('skills.save'),
 };
 
@@ -749,6 +770,19 @@ export const mcpService = {
     IBridgeResponse<{ server: IMcpServer }>,
     { serverId: string; clientId: string; clientSecret?: string }
   >('mcp.set-byo-oauth-credentials'),
+};
+
+export const meetings = {
+  getSettings: buildProvider<MeetingsSettingsPublic, void>('meetings.get-settings'),
+  saveSettings: buildProvider<MeetingsSettingsPublic, MeetingsSaveSettingsRequest>('meetings.save-settings'),
+  list: buildProvider<MeetingsListResponse, MeetingsListRequest>('meetings.list'),
+  getSummary: buildProvider<MeetingSummaryResponse, MeetingSummaryRequest>('meetings.get-summary'),
+  markSummaryIngested: buildProvider<MeetingInteractionRecord, MeetingMarkSummaryIngestedRequest>(
+    'meetings.mark-summary-ingested'
+  ),
+  sendToLetterly: buildProvider<MeetingDeliveryRecord, MeetingSendRequest>('meetings.send-to-letterly'),
+  listLetterlyNotes: buildProvider<LetterlyNoteSummary[], void>('meetings.list-letterly-notes'),
+  runAutomationOnce: buildProvider<MeetingAutomationResult, void>('meetings.run-automation-once'),
 };
 
 // Codex conversation related interface - reuses the unified conversation interface
@@ -1052,6 +1086,7 @@ export const cron = {
   listJobs: buildProvider<ICronJob[], void>('cron.list-jobs'),
   listJobsByConversation: buildProvider<ICronJob[], { conversationId: string }>('cron.list-jobs-by-conversation'),
   getJob: buildProvider<ICronJob | null, { jobId: string }>('cron.get-job'),
+  draftTask: buildProvider<ICronTaskDraftResponse, ICronTaskDraftRequest>('cron.draft-task'),
   // CRUD
   addJob: buildProvider<ICronJob, ICreateCronJobParams>('cron.add-job'),
   updateJob: buildProvider<ICronJob, { jobId: string; updates: Partial<ICronJob> }>('cron.update-job'),
@@ -1159,6 +1194,22 @@ export interface ICreateCronJobParams {
   createdBy: 'user' | 'agent';
   executionMode?: 'existing' | 'new_conversation';
   agentConfig?: ICronAgentConfig;
+}
+
+export interface ICronTaskDraftRequest {
+  description: string;
+  currentName?: string;
+  currentPrompt?: string;
+  scheduleDescription?: string;
+  conversationTitle?: string;
+}
+
+export interface ICronTaskDraftResponse {
+  name: string;
+  description: string;
+  prompt: string;
+  steps: string[];
+  error?: 'no-model' | 'failed';
 }
 
 interface ISendMessageParams {
@@ -2165,6 +2216,10 @@ export const workflow = {
   // WorkflowDetailModal to decide between launching a new session and
   // surfacing the resume-prompt (when updated_at < 14 days).
   findActive: buildProvider<{ session: WorkflowSession | null }, { workflow_name: string }>('workflow.findActive'),
+  // Exact session lookup for direct conversation URLs and refreshes. The chat
+  // surface already has a session id; it should not depend on the active-list
+  // window to hydrate the right rail.
+  findById: buildProvider<{ session: WorkflowSession | null }, { sessionId: string }>('workflow.findById'),
   // 6.3.1 - Cross-workflow in-flight sessions for the launchpad "In-flight
   // workflows" strip (Codex finding #7). conversation_preview is the first
   // ~80 chars of the most recent agent message in the underlying conversation.
@@ -2214,13 +2269,14 @@ export const workflow = {
 // as a sentinel so the renderer can guarantee exactly-once begin semantics
 // across Strict Mode double-mount, refresh, and back-navigation.
 export type WorkflowUpdateSessionStatePatch = {
-  setStepStatus?: { n: number; status: StepStatus; completed_at?: number };
+  setStepStatus?: { n: number; status: StepStatus; completed_at?: number; source?: StepTransitionSource };
   setCurrentStep?: number;
   appendAsk?: AskRecord;
   answerAsk?: { askId: string; answer: string; answered_at: number };
   setSessionStatus?: WorkflowSessionStatus;
   recordAutonomousDispatch?: { stepN: number; dispatchId: string };
   recordAutonomousResult?: { stepN: number; success: boolean };
+  insertCustomStep?: { afterStepN: number; step: WorkflowDraftStep };
   /** Epoch ms when the hidden begin auto-send fired. Idempotent - service no-ops if already set. */
   setBeginSent?: number;
 };
@@ -2518,6 +2574,20 @@ export const project = {
     { available: boolean; files: Array<{ name: string; content: string }> },
     { id: string }
   >('project.read-ijfw-memory'),
+  /** Read recent forwarded-email ingests for this project. */
+  readEmailIngestHistory: buildProvider<ProjectEmailIngestRecord[], { id: string }>(
+    'project.read-email-ingest-history'
+  ),
+  /** Download a trusted remote attachment link captured from a project email ingest into project references. */
+  importEmailRemoteAttachment: buildProvider<
+    { ok: true; file: string } | { ok: false; error: string },
+    { id: string; ingestId: string; url: string }
+  >('project.import-email-remote-attachment'),
+  /** Mark a captured remote email attachment as ignored so it stops showing in the project references queue. */
+  ignoreEmailRemoteAttachment: buildProvider<
+    { ok: true } | { ok: false; error: string },
+    { id: string; ingestId: string; url: string }
+  >('project.ignore-email-remote-attachment'),
   /**
    * Fired whenever the project list or a project's membership changes.
    *

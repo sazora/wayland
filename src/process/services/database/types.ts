@@ -258,6 +258,10 @@ export interface IProjectRow {
   name: string;
   description?: string | null;
   workspace?: string | null;
+  email_alias?: string | null;
+  email_intake_enabled?: number | null;
+  email_allowed_senders?: string | null;
+  email_ingest_behavior?: string | null;
   icon?: string | null;
   icon_color?: string | null;
   pinned: number; // 0 | 1
@@ -276,6 +280,10 @@ export function projectToRow(project: IProject, userId: string): IProjectRow {
     name: project.name,
     description: project.description ?? null,
     workspace: project.workspace ?? null,
+    email_alias: project.emailAlias ?? null,
+    email_intake_enabled: project.emailIntakeEnabled ? 1 : 0,
+    email_allowed_senders: JSON.stringify(project.emailAllowedSenders ?? []),
+    email_ingest_behavior: project.emailIngestBehavior ?? 'save',
     icon: project.icon ?? null,
     icon_color: project.iconColor ?? null,
     pinned: project.pinned ? 1 : 0,
@@ -283,6 +291,30 @@ export function projectToRow(project: IProject, userId: string): IProjectRow {
     created_at: project.createTime,
     updated_at: project.modifyTime,
   };
+}
+
+function parseJsonArray(raw?: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseEmailIngestBehavior(raw?: string | null): IProject['emailIngestBehavior'] {
+  if (
+    raw === 'save' ||
+    raw === 'save-and-notify' ||
+    raw === 'save-and-summarize' ||
+    raw === 'save-add-to-knowledge' ||
+    raw === 'act-on-instructions' ||
+    raw === 'act-add-knowledge-and-references'
+  ) {
+    return raw;
+  }
+  return 'save';
 }
 
 /**
@@ -294,6 +326,10 @@ export function rowToProject(row: IProjectRow): IProject {
     name: row.name,
     description: row.description ?? undefined,
     workspace: row.workspace ?? undefined,
+    emailAlias: row.email_alias ?? undefined,
+    emailIntakeEnabled: row.email_intake_enabled === 1,
+    emailAllowedSenders: parseJsonArray(row.email_allowed_senders),
+    emailIngestBehavior: parseEmailIngestBehavior(row.email_ingest_behavior),
     icon: row.icon ?? undefined,
     iconColor: row.icon_color ?? undefined,
     pinned: row.pinned === 1,

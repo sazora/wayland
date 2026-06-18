@@ -138,7 +138,34 @@
     "instructionsHint": "Injected into every chat in this project.",
     "rulesHint": "Hard constraints every chat must follow.",
     "helpWrite": "Help me write this",
-    "needWorkspace": "Set a workspace folder first to write instructions and rules."
+    "needWorkspace": "Set a workspace folder first to write instructions and rules.",
+    "email": {
+      "title": "Email intake",
+      "enableLabel": "Project email intake",
+      "enableHint": "Forward email to this address and Wayland saves the message, attachments, and provenance into this project.",
+      "aliasLabel": "Project address",
+      "aliasHint": "Aliases are unique across Wayland. Use lowercase letters, numbers, dots, dashes, or underscores.",
+      "allowedLabel": "Allowed senders",
+      "allowedPlaceholder": "name@example.com\nteammate@example.com",
+      "allowedHint": "Optional. Leave blank to accept forwarded mail from any sender.",
+      "behaviorLabel": "After ingest",
+      "behaviorSave": "Save as reference",
+      "behaviorNotify": "Save and notify",
+      "behaviorSummarize": "Save and summarize",
+      "behaviorKnowledge": "Save and add to knowledge",
+      "behaviorAct": "Act on instructions",
+      "behaviorActKnowledgeReferences": "Act, add knowledge, and save references",
+      "historyLabel": "Recent ingests",
+      "historyCount": "{{count}} shown",
+      "historyEmpty": "No email has been ingested into this project yet.",
+      "unknownSender": "Unknown sender",
+      "filesSaved": "{{count}} reference files",
+      "status": {
+        "saved": "Saved",
+        "rejected": "Rejected",
+        "failed": "Failed"
+      }
+    }
   },
   "reference": {
     "title": "Reference files",

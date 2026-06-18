@@ -23,6 +23,20 @@ export type IProject = {
   description?: string;
   /** Optional working directory. When set, a `.wayland/` knowledge folder is bootstrapped here. */
   workspace?: string;
+  /** Project-specific inbound email local part, e.g. `penndot` for `penndot@wl.cksz.us`. */
+  emailAlias?: string;
+  /** Whether inbound email to the alias is accepted for this project. */
+  emailIntakeEnabled?: boolean;
+  /** Optional lowercased sender allowlist. Empty means any sender is accepted. */
+  emailAllowedSenders?: string[];
+  /** What WL does after receiving an email. */
+  emailIngestBehavior?:
+    | 'save'
+    | 'save-and-notify'
+    | 'save-and-summarize'
+    | 'save-add-to-knowledge'
+    | 'act-on-instructions'
+    | 'act-add-knowledge-and-references';
   /** Icon-park / lucide icon name for the project tile. */
   icon?: string;
   /** Hex color for the icon chip. */
@@ -38,9 +52,28 @@ export type ICreateProjectParams = {
   name: string;
   description?: string;
   workspace?: string;
+  emailAlias?: string;
+  emailIntakeEnabled?: boolean;
+  emailAllowedSenders?: string[];
+  emailIngestBehavior?: IProject['emailIngestBehavior'];
   icon?: string;
   iconColor?: string;
 };
 
 /** Fields a user may edit on an existing project. */
-export type IUpdateProjectParams = Partial<Pick<IProject, 'name' | 'description' | 'workspace' | 'icon' | 'iconColor' | 'pinned' | 'pinnedAt'>>;
+export type IUpdateProjectParams = Partial<
+  Pick<
+    IProject,
+    | 'name'
+    | 'description'
+    | 'workspace'
+    | 'emailAlias'
+    | 'emailIntakeEnabled'
+    | 'emailAllowedSenders'
+    | 'emailIngestBehavior'
+    | 'icon'
+    | 'iconColor'
+    | 'pinned'
+    | 'pinnedAt'
+  >
+>;

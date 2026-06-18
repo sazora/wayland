@@ -6,19 +6,47 @@
 
 import { ipcBridge } from '@/common';
 import { Button, Message } from '@arco-design/web-react';
-import { FileText, FolderOpen, Paperclip, X } from 'lucide-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import { Ban, DownloadCloud, ExternalLink, FileText, FolderOpen, Paperclip, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkspaceDragImport } from '@/renderer/pages/conversation/Workspace/hooks/useWorkspaceDragImport';
 import styles from './projectCards.module.css';
 
 type ReferenceFile = { name: string; path: string; size: number };
+type RemoteAttachmentLink = {
+  url: string;
+  label?: string;
+  filename?: string;
+  size?: string;
+  status?: 'pending' | 'saved' | 'failed' | 'ignored';
+  savedReferenceFile?: string;
+  lastError?: string;
+};
+type EmailIngestRecord = {
+  id: string;
+  subject: string;
+  from: string;
+  receivedAt: number;
+  remoteAttachmentLinks?: RemoteAttachmentLink[];
+};
 
 const fmtSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
+
+async function parseReferenceResponse(response: Response, fallbackMessage: string): Promise<ReferenceFile[]> {
+  const json = await response.json().catch((): null => null);
+  if (!response.ok || json?.ok === false) throw new Error(json?.error || fallbackMessage);
+  return Array.isArray(json?.files) ? json.files : [];
+}
+
+async function parseEmailHistoryResponse(response: Response): Promise<EmailIngestRecord[]> {
+  const json = await response.json().catch((): null => null);
+  if (!response.ok || json?.ok === false) throw new Error(json?.error || 'project-email-history-load-failed');
+  return Array.isArray(json?.history) ? json.history : [];
+}
 
 /**
  * Reference files as their own tab: material the AI can draw on (specs, brand
@@ -32,7 +60,39 @@ const ProjectReferencePanel: React.FC<{
 }> = ({ projectId, hasWorkspace, onSetWorkspace }) => {
   const { t } = useTranslation();
   const [refs, setRefs] = useState<ReferenceFile[]>([]);
+  const [emailHistory, setEmailHistory] = useState<EmailIngestRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [importingKey, setImportingKey] = useState<string | null>(null);
+  const [ignoringKey, setIgnoringKey] = useState<string | null>(null);
+
+  const visibleRefs = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return refs;
+    return refs.filter((file) => file.name.toLowerCase().includes(needle));
+  }, [refs, query]);
+
+  const remoteAttachments = useMemo(
+    () =>
+      emailHistory.flatMap((record) =>
+        (record.remoteAttachmentLinks ?? [])
+          .filter((link) => link.status !== 'ignored')
+          .map((link) => ({
+          url: link.url,
+          label: link.label,
+          filename: link.filename,
+          size: link.size,
+          status: link.status,
+          savedReferenceFile: link.savedReferenceFile,
+          lastError: link.lastError,
+          ingestId: record.id,
+          subject: record.subject,
+          from: record.from,
+          receivedAt: record.receivedAt,
+        }))
+      ),
+    [emailHistory]
+  );
 
   const load = useCallback(async () => {
     if (!hasWorkspace) {
@@ -40,8 +100,14 @@ const ProjectReferencePanel: React.FC<{
       return;
     }
     try {
-      const r = await ipcBridge.project.listReference.invoke({ id: projectId });
-      setRefs(Array.isArray(r) ? r : []);
+      const response = await fetch(`/wl-project/reference?id=${encodeURIComponent(projectId)}`, {
+        credentials: 'include',
+      });
+      setRefs(await parseReferenceResponse(response, 'wl-reference-list-failed'));
+      const historyResponse = await fetch(`/api/project-email-ingest/history?id=${encodeURIComponent(projectId)}`, {
+        credentials: 'include',
+      });
+      setEmailHistory(await parseEmailHistoryResponse(historyResponse));
     } catch (err) {
       console.error('[ProjectReferencePanel] load failed:', err);
     } finally {
@@ -56,13 +122,19 @@ const ProjectReferencePanel: React.FC<{
   const onFilesDropped = useCallback(
     async (files: Array<{ path: string; name: string }>) => {
       try {
-        const updated = await ipcBridge.project.addReference.invoke({
-          id: projectId,
-          filePaths: files.map((f) => f.path),
+        const response = await fetch('/wl-project/reference/add', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            id: projectId,
+            filePaths: files.map((f) => f.path).filter(Boolean),
+          }),
         });
-        setRefs(Array.isArray(updated) ? updated : []);
+        setRefs(await parseReferenceResponse(response, 'wl-reference-add-failed'));
         Message.success(t('projects.knowledge.fileAdded', { count: files.length }));
-      } catch {
+      } catch (err) {
+        console.error('[ProjectReferencePanel] add failed:', err);
         Message.error(t('projects.knowledge.fileAddFailed'));
       }
     },
@@ -84,13 +156,69 @@ const ProjectReferencePanel: React.FC<{
   const removeRef = useCallback(
     async (name: string) => {
       try {
-        const updated = await ipcBridge.project.removeReference.invoke({ id: projectId, name });
-        setRefs(Array.isArray(updated) ? updated : []);
-      } catch {
+        const response = await fetch('/wl-project/reference/remove', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ id: projectId, name }),
+        });
+        setRefs(await parseReferenceResponse(response, 'wl-reference-remove-failed'));
+      } catch (err) {
+        console.error('[ProjectReferencePanel] remove failed:', err);
         Message.error(t('projects.knowledge.fileRemoveFailed'));
       }
     },
     [projectId, t]
+  );
+
+  const importRemoteAttachment = useCallback(
+    async (ingestId: string, url: string) => {
+      const key = `${ingestId}:${url}`;
+      setImportingKey(key);
+      try {
+        const response = await fetch('/api/project-email-ingest/remote-import', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ id: projectId, ingestId, url }),
+        });
+        const result = await response.json().catch((): null => null);
+        if (!response.ok || result?.ok === false) throw new Error(result?.error || 'remote-attachment-import-failed');
+        Message.success(`Imported ${result.file}`);
+        await load();
+      } catch (err) {
+        console.error('[ProjectReferencePanel] remote import failed:', err);
+        Message.error('Remote attachment import failed');
+      } finally {
+        setImportingKey(null);
+      }
+    },
+    [load, projectId]
+  );
+
+  const ignoreRemoteAttachment = useCallback(
+    async (ingestId: string, url: string) => {
+      const key = `${ingestId}:${url}`;
+      setIgnoringKey(key);
+      try {
+        const response = await fetch('/api/project-email-ingest/remote-ignore', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ id: projectId, ingestId, url }),
+        });
+        const result = await response.json().catch((): null => null);
+        if (!response.ok || result?.ok === false) throw new Error(result?.error || 'remote-attachment-ignore-failed');
+        Message.success('Remote attachment excluded');
+        await load();
+      } catch (err) {
+        console.error('[ProjectReferencePanel] remote ignore failed:', err);
+        Message.error('Remote attachment exclude failed');
+      } finally {
+        setIgnoringKey(null);
+      }
+    },
+    [load, projectId]
   );
 
   if (!hasWorkspace) {
@@ -125,10 +253,122 @@ const ProjectReferencePanel: React.FC<{
       </div>
 
       {refs.length > 0 && (
+        <input
+          data-wl-reference-search='true'
+          type='search'
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder='Search reference files'
+          className='w-full px-12px py-9px rd-8px text-13px bg-fill-1 text-t-primary'
+          style={{ border: '1px solid var(--color-border-2)', outline: 'none' }}
+        />
+      )}
+
+      {remoteAttachments.length > 0 && (
+        <div className='flex flex-col gap-10px rd-8px px-14px py-13px bg-fill-1'>
+          <div className='flex items-center justify-between gap-12px'>
+            <div className='flex flex-col gap-2px'>
+              <div className='text-13px font-700 text-t-primary'>Remote attachments</div>
+              <div className='text-11px text-t-tertiary'>Mail Drop and other links captured from project email.</div>
+            </div>
+          </div>
+          <div className='flex flex-col gap-8px'>
+            {remoteAttachments.map((item) => {
+              const key = `${item.ingestId}:${item.url}`;
+              const title = item.filename || item.label || 'Remote attachment';
+              const imported = item.status === 'saved' && item.savedReferenceFile;
+              return (
+                <div
+                  key={key}
+                  className='flex items-center justify-between gap-12px px-10px py-9px rd-8px bg-bg-1'
+                  style={{ border: '1px solid var(--color-border-2)' }}
+                >
+                  <div className='min-w-0 flex flex-col gap-2px'>
+                    <div className='text-12.5px font-600 text-t-primary truncate' title={title}>
+                      {title}
+                    </div>
+                    <div className='text-11px text-t-tertiary truncate' title={item.subject}>
+                      {item.size ? `${item.size} · ` : ''}
+                      {imported ? `Imported as ${item.savedReferenceFile}` : item.subject}
+                    </div>
+                    {item.status === 'failed' && item.lastError && (
+                      <div className='text-11px text-danger-6 truncate' title={item.lastError}>
+                        {item.lastError}
+                      </div>
+                    )}
+                  </div>
+                  <div className='flex items-center gap-6px shrink-0'>
+                    <Button
+                      size='mini'
+                      type='text'
+                      icon={<ExternalLink size={12} />}
+                      style={{
+                        border: '1px solid var(--color-border-3)',
+                        background: 'var(--color-fill-2)',
+                        color: 'var(--color-text-1)',
+                      }}
+                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                    />
+                    {!imported && (
+                      <Button
+                        size='mini'
+                        type='outline'
+                        icon={<Ban size={12} />}
+                        loading={ignoringKey === key}
+                        style={{
+                          borderColor: 'var(--color-warning-6)',
+                          color: 'var(--color-warning-7)',
+                          background: 'var(--color-bg-1)',
+                        }}
+                        onClick={() => void ignoreRemoteAttachment(item.ingestId, item.url)}
+                      >
+                        Exclude
+                      </Button>
+                    )}
+                    <Button
+                      size='mini'
+                      type={imported ? 'secondary' : 'outline'}
+                      icon={<DownloadCloud size={12} />}
+                      loading={importingKey === key}
+                      disabled={Boolean(imported)}
+                      style={
+                        imported
+                          ? undefined
+                          : {
+                              borderColor: 'var(--color-primary-6)',
+                              color: 'var(--color-primary-7)',
+                              background: 'var(--color-primary-light-1)',
+                            }
+                      }
+                      onClick={() => void importRemoteAttachment(item.ingestId, item.url)}
+                    >
+                      {imported ? 'Imported' : item.status === 'failed' ? 'Retry' : 'Import'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {refs.length > 0 && visibleRefs.length === 0 && (
+        <div
+          data-wl-reference-search-empty='true'
+          className='rd-8px border border-dashed border-2 px-14px py-18px text-12px text-t-tertiary text-center'
+        >
+          No matching reference files
+        </div>
+      )}
+
+      {visibleRefs.length > 0 && (
         <div className='grid gap-12px' style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
-          {refs.map((f) => (
+          {visibleRefs.map((f) => (
             <div
               key={f.name}
+              data-wl-reference-card='true'
+              data-wl-reference-name={f.name}
+              tabIndex={0}
               className={`group flex flex-col gap-8px px-14px py-13px ${styles.card}`}
             >
               <div className='flex items-start justify-between'>
@@ -155,6 +395,7 @@ const ProjectReferencePanel: React.FC<{
 
       <div
         {...dragHandlers}
+        data-wl-reference-dropzone='true'
         className='flex flex-col items-center justify-center gap-8px rd-12px px-16px py-28px text-center transition-colors cursor-pointer'
         style={{
           border: `1.5px dashed ${isDragging ? 'var(--color-primary-6)' : 'var(--color-border-2)'}`,

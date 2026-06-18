@@ -12,6 +12,77 @@ import type { TChatConversation } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
 import { bootstrapProjectKnowledge } from '@process/services/projectKnowledge/bootstrap';
 
+const EMAIL_ALIAS_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
+
+export function normalizeProjectEmailAlias(value: string | undefined): string | undefined {
+  const normalized = (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/@.*$/, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9._-]/g, '-')
+    .replace(/[-_.]{2,}/g, '-')
+    .replace(/^[-_.]+|[-_.]+$/g, '')
+    .slice(0, 63);
+  return normalized || undefined;
+}
+
+function normalizeSenderList(value: string[] | undefined): string[] {
+  return Array.from(
+    new Set(
+      (value ?? [])
+        .map((sender) => sender.trim().toLowerCase())
+        .filter((sender) => sender.includes('@'))
+    )
+  );
+}
+
+async function uniqueProjectEmailAlias(repo: IProjectRepository, requested: string, projectId?: string): Promise<string> {
+  const base = normalizeProjectEmailAlias(requested) || 'project';
+  let candidate = base;
+  let suffix = 2;
+  const projects = await repo.listProjects();
+  const taken = new Set(
+    projects
+      .filter((project) => project.id !== projectId)
+      .map((project) => project.emailAlias)
+      .filter((alias): alias is string => !!alias)
+  );
+  while (taken.has(candidate)) {
+    const suffixText = `-${suffix}`;
+    candidate = `${base.slice(0, 63 - suffixText.length)}${suffixText}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+async function prepareEmailIntakeUpdates(
+  repo: IProjectRepository,
+  updates: IUpdateProjectParams,
+  projectId?: string
+): Promise<IUpdateProjectParams> {
+  const next = { ...updates };
+  if ('emailAlias' in next) {
+    const alias = normalizeProjectEmailAlias(next.emailAlias);
+    if (alias && !EMAIL_ALIAS_PATTERN.test(alias)) {
+      throw new Error('Email alias must start and end with a letter or number and use letters, numbers, dots, dashes, or underscores.');
+    }
+    next.emailAlias = alias;
+    if (alias) {
+      const projects = await repo.listProjects();
+      const collision = projects.find((project) => project.id !== projectId && project.emailAlias === alias);
+      if (collision) throw new Error(`Email alias "${alias}" is already used by another project`);
+    }
+  }
+  if ('emailAllowedSenders' in next) {
+    next.emailAllowedSenders = normalizeSenderList(next.emailAllowedSenders);
+  }
+  if (!next.emailIngestBehavior) {
+    delete next.emailIngestBehavior;
+  }
+  return next;
+}
+
 /**
  * Concrete IProjectService. Owns id/timestamp generation and the `.wayland/`
  * knowledge bootstrap; delegates persistence to an injected repository and
@@ -26,11 +97,16 @@ export class ProjectServiceImpl implements IProjectService {
 
   async createProject(params: ICreateProjectParams): Promise<IProject> {
     const now = Date.now();
+    const emailAlias = await uniqueProjectEmailAlias(this.repo, params.emailAlias || params.name);
     const project: IProject = {
       id: uuid(),
       name: params.name.trim() || 'Untitled project',
       description: params.description,
       workspace: params.workspace,
+      emailAlias,
+      emailIntakeEnabled: params.emailIntakeEnabled ?? false,
+      emailAllowedSenders: normalizeSenderList(params.emailAllowedSenders),
+      emailIngestBehavior: params.emailIngestBehavior ?? 'save',
       icon: params.icon,
       iconColor: params.iconColor,
       pinned: false,
@@ -59,7 +135,7 @@ export class ProjectServiceImpl implements IProjectService {
   }
 
   async updateProject(id: string, updates: IUpdateProjectParams): Promise<void> {
-    await this.repo.updateProject(id, updates);
+    await this.repo.updateProject(id, await prepareEmailIntakeUpdates(this.repo, updates, id));
     // If a workspace was just set on a project that didn't have one, bootstrap
     // its knowledge folder now.
     if (updates.workspace) {

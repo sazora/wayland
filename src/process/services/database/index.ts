@@ -790,8 +790,12 @@ export class WaylandUIDatabase {
     try {
       const row = projectToRow(project, userId || this.defaultUserId);
       const stmt = this.db.prepare(`
-        INSERT INTO projects (id, user_id, name, description, workspace, icon, icon_color, pinned, pinned_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (
+          id, user_id, name, description, workspace, email_alias, email_intake_enabled,
+          email_allowed_senders, email_ingest_behavior, icon, icon_color, pinned,
+          pinned_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run(
         row.id,
@@ -799,6 +803,10 @@ export class WaylandUIDatabase {
         row.name,
         row.description ?? null,
         row.workspace ?? null,
+        row.email_alias ?? null,
+        row.email_intake_enabled ?? 0,
+        row.email_allowed_senders ?? '[]',
+        row.email_ingest_behavior ?? 'save',
         row.icon ?? null,
         row.icon_color ?? null,
         row.pinned,
@@ -845,13 +853,28 @@ export class WaylandUIDatabase {
       const row = projectToRow(merged, this.defaultUserId);
       const stmt = this.db.prepare(`
         UPDATE projects
-        SET name = ?, description = ?, workspace = ?, icon = ?, icon_color = ?, pinned = ?, pinned_at = ?, updated_at = ?
+        SET name = ?,
+            description = ?,
+            workspace = ?,
+            email_alias = ?,
+            email_intake_enabled = ?,
+            email_allowed_senders = ?,
+            email_ingest_behavior = ?,
+            icon = ?,
+            icon_color = ?,
+            pinned = ?,
+            pinned_at = ?,
+            updated_at = ?
         WHERE id = ?
       `);
       stmt.run(
         row.name,
         row.description ?? null,
         row.workspace ?? null,
+        row.email_alias ?? null,
+        row.email_intake_enabled ?? 0,
+        row.email_allowed_senders ?? '[]',
+        row.email_ingest_behavior ?? 'save',
         row.icon ?? null,
         row.icon_color ?? null,
         row.pinned,

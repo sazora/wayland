@@ -5,6 +5,7 @@
  */
 
 import type { AcpBackend, AcpBackendAll, AcpBackendConfig } from '@/common/types/acpTypes';
+import type { MeetingDeliveryRecord, MeetingInteractionRecord, MeetingsSettingsPublic } from '@/common/types/meetings';
 import type { SpeechToTextConfig } from '@/common/types/speech';
 import type { TextToSpeechConfig } from '@/common/types/ttsTypes';
 // C1: route through wrapped buildStorage so every namespace's storage.{get,set,clear,remove}
@@ -76,6 +77,26 @@ export type ChannelDefaultModel = { id: string; useModel: string };
 /** A saved agent selection for a channel. */
 export type ChannelAgentSelection = { backend: string; customAgentId?: string; name?: string };
 
+/** User-authored scratch notes scoped to a conversation. */
+export type ConversationNote = {
+  id: string;
+  text: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** Per-conversation agent briefing preferences used by the Workspace Agent tab. */
+export type ConversationAgentBrief = {
+  largerTask?: string;
+  audience?: string;
+  enables?: string;
+  goal?: string;
+  boundaries?: string;
+  outputShape?: string;
+  profileId?: string;
+  selectedCards?: string[];
+};
+
 /**
  * Generated config keys for every channel's default-model + agent selection.
  * Intersected into the ConfigStorage refer so each channel gets type-safe
@@ -128,6 +149,10 @@ export interface IConfigStorageRefer {
   'acp.agentIdleTimeout'?: number;
   /** User-defined custom ACP agents (isPreset !== true, require defaultCliPath). */
   'acp.customAgents'?: AcpBackendConfig[];
+  /** Per-conversation user scratch notes, keyed by conversation id. */
+  'conversation.notes'?: Record<string, ConversationNote[]>;
+  /** Per-conversation agent briefing profiles, prompt cards, and draft fields. */
+  'conversation.agentBriefs'?: Record<string, ConversationAgentBrief>;
   /**
    * Agent keys the user hid from the Guid-page agent toolbar strip. Detected
    * agents whose key is listed here stay detected (and still appear on the
@@ -156,6 +181,23 @@ export interface IConfigStorageRefer {
   'model.config': IProvider[];
   'mcp.config': IMcpServer[];
   'mcp.agentInstallStatus': Record<string, string[]>;
+  /** Encrypted Fathom API key used by the Meetings integration. */
+  'meetings.fathom.apiKey'?: string;
+  /** Encrypted Fathom webhook signing secret used to verify inbound meeting events. */
+  'meetings.fathom.webhookSecret'?: string;
+  /** Public, non-secret Meetings integration settings. */
+  'meetings.settings'?: Omit<
+    MeetingsSettingsPublic,
+    'hasFathomApiKey' | 'hasFathomWebhookSecret' | 'letterlyServerName'
+  >;
+  /** Dedupe and delivery status records keyed by Fathom recording id. */
+  'meetings.delivery'?: Record<string, MeetingDeliveryRecord>;
+  /** Summary view and project-ingest records keyed by Fathom recording id. */
+  'meetings.interactions'?: Record<string, MeetingInteractionRecord>;
+  /** Shared secret Cloudflare Email Worker must send to the project email intake endpoint. */
+  'projectEmailIntake.webhookSecret'?: string;
+  /** Domain used for project email aliases, e.g. wl.cksz.us. */
+  'projectEmailIntake.domain'?: string;
   language: string;
   theme: string;
   colorScheme: string;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { type Express, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
+import express, { type Express, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import http from 'node:http';
@@ -19,6 +19,14 @@ import { ExtensionRegistry } from '@process/extensions';
 import { SpeechToTextService } from '@process/bridge/services/SpeechToTextService';
 import { isActivePreviewPort } from '@process/bridge/pptPreviewBridge';
 import { isActiveOfficeWatchPort } from '@process/bridge/officeWatchBridge';
+import { projectServiceSingleton } from '@process/services/projectServiceSingleton';
+import {
+  ignoreProjectEmailRemoteAttachment,
+  importProjectEmailRemoteAttachment,
+  ProjectEmailIntakeService,
+  type ProjectEmailIntakeRequest,
+  readProjectEmailIngestHistory,
+} from '@process/services/projectEmailIntake/ProjectEmailIntakeService';
 import { WAYLAND_TIMESTAMP_SEPARATOR } from '@/common/config/constants';
 import directoryApi from '../directoryApi';
 import { apiRateLimiter } from '../middleware/security';
@@ -37,6 +45,8 @@ const uploadAudio = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_AUDIO_SIZE },
 });
+const EMAIL_INTAKE_JSON_LIMIT = '35mb';
+const projectEmailIntakeService = new ProjectEmailIntakeService(projectServiceSingleton);
 
 /**
  * Decode filename from multer.
@@ -121,6 +131,84 @@ function wrapRouteHandler(handler: RequestHandler): RequestHandler {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
 }
+
+const handleProjectEmailIntake = wrapRouteHandler(async (req: Request, res: Response) => {
+  const configuredSecret =
+    process.env.WAYLAND_EMAIL_INTAKE_SECRET ||
+    (await ProcessConfig.get('projectEmailIntake.webhookSecret').catch((): string | undefined => undefined));
+  if (!configuredSecret) {
+    res.status(503).json({ ok: false, error: 'email-intake-secret-not-configured' });
+    return;
+  }
+  if (req.headers['x-wayland-email-secret'] !== configuredSecret) {
+    res.status(401).json({ ok: false, error: 'invalid-email-intake-secret' });
+    return;
+  }
+
+  const domain =
+    process.env.WAYLAND_EMAIL_INTAKE_DOMAIN ||
+    (await ProcessConfig.get('projectEmailIntake.domain').catch((): string | undefined => undefined)) ||
+    'wl.cksz.us';
+  const result = await projectEmailIntakeService.ingest(req.body as ProjectEmailIntakeRequest, domain);
+  if (result.ok === false) {
+    res.status(result.status).json({ ok: false, error: result.error });
+    return;
+  }
+  res.status(202).json({ ok: true, projectId: result.projectId, alias: result.alias, record: result.record });
+});
+
+const handleProjectEmailIngestHistory = wrapRouteHandler(async (req: Request, res: Response) => {
+  const projectId = typeof req.query.id === 'string' ? req.query.id : '';
+  if (!projectId) {
+    res.status(400).json({ ok: false, error: 'project-id-required' });
+    return;
+  }
+  const project = await projectServiceSingleton.getProject(projectId);
+  if (!project?.workspace) {
+    res.status(404).json({ ok: false, error: 'project-has-no-workspace' });
+    return;
+  }
+  const history = await readProjectEmailIngestHistory(project.workspace);
+  res.json({ ok: true, history });
+});
+
+const handleProjectEmailRemoteImport = wrapRouteHandler(async (req: Request, res: Response) => {
+  const { id, ingestId, url } = req.body as { id?: string; ingestId?: string; url?: string };
+  if (!id || !ingestId || !url) {
+    res.status(400).json({ ok: false, error: 'remote-attachment-import-fields-required' });
+    return;
+  }
+  const project = await projectServiceSingleton.getProject(id);
+  if (!project?.workspace) {
+    res.status(404).json({ ok: false, error: 'project-has-no-workspace' });
+    return;
+  }
+  const result = await importProjectEmailRemoteAttachment(project.workspace, ingestId, url);
+  if (!result.ok) {
+    res.status(result.status).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({ ok: true, file: result.file, record: result.record });
+});
+
+const handleProjectEmailRemoteIgnore = wrapRouteHandler(async (req: Request, res: Response) => {
+  const { id, ingestId, url } = req.body as { id?: string; ingestId?: string; url?: string };
+  if (!id || !ingestId || !url) {
+    res.status(400).json({ ok: false, error: 'remote-attachment-ignore-fields-required' });
+    return;
+  }
+  const project = await projectServiceSingleton.getProject(id);
+  if (!project?.workspace) {
+    res.status(404).json({ ok: false, error: 'project-has-no-workspace' });
+    return;
+  }
+  const result = await ignoreProjectEmailRemoteAttachment(project.workspace, ingestId, url);
+  if (!result.ok) {
+    res.status(result.status).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({ ok: true, record: result.record });
+});
 
 function runMiddlewareStack(req: Request, res: Response, next: NextFunction, stack: RequestHandler[]): void {
   let index = 0;
@@ -269,6 +357,23 @@ export function registerApiRoutes(app: Express): void {
   const validateApiAccess = TokenMiddleware.validateToken({
     responseType: 'json',
   });
+
+  app.post('/api/project-email-intake/cloudflare', express.json({ limit: EMAIL_INTAKE_JSON_LIMIT }), handleProjectEmailIntake);
+  app.get('/api/project-email-ingest/history', apiRateLimiter, validateApiAccess, handleProjectEmailIngestHistory);
+  app.post(
+    '/api/project-email-ingest/remote-import',
+    apiRateLimiter,
+    validateApiAccess,
+    express.json({ limit: '2mb' }),
+    handleProjectEmailRemoteImport
+  );
+  app.post(
+    '/api/project-email-ingest/remote-ignore',
+    apiRateLimiter,
+    validateApiAccess,
+    express.json({ limit: '2mb' }),
+    handleProjectEmailRemoteIgnore
+  );
 
   /**
    * Directory API

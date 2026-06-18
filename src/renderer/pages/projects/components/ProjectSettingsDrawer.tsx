@@ -7,15 +7,49 @@
 import { ipcBridge } from '@/common';
 import type { IProject } from '@/common/types/project';
 import TipTapMarkdownEditor from '@/renderer/pages/conversation/Preview/components/editors/TipTapMarkdownEditor';
-import { Button, Drawer, Input, Message } from '@arco-design/web-react';
-import { FolderOpen, Settings as SettingsIcon, Sparkles, X } from 'lucide-react';
+import { Button, Drawer, Input, Message, Select, Switch, Tag } from '@arco-design/web-react';
+import { FolderOpen, Inbox, Settings as SettingsIcon, Sparkles, X } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import KnowledgeWizard, { type WizardKind } from './KnowledgeWizard';
 
 const PROJECT_COLORS = ['#FF6A00', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B'];
 
-export type SettingsSection = 'general' | 'context' | 'rules';
+export type SettingsSection = 'general' | 'context' | 'rules' | 'email';
+
+type ProjectEmailIngestHistoryItem = {
+  id: string;
+  from: string;
+  subject: string;
+  receivedAt: number;
+  status: 'saved' | 'rejected' | 'failed';
+  reason?: string;
+  referenceFiles: string[];
+  attachmentCount: number;
+};
+
+const EMAIL_DOMAIN = 'wl.cksz.us';
+
+function normalizeAlias(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(new RegExp(`@${EMAIL_DOMAIN.replace('.', '\\.')}$`, 'i'), '')
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+function parseSenderList(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\n;\s]+/)
+        .map((sender) => sender.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
 
 /**
  * Project settings as a full-height right drawer. Instructions and Rules are
@@ -39,6 +73,11 @@ const ProjectSettingsDrawer: React.FC<{
   const [description, setDescription] = useState(project.description || '');
   const [workspace, setWorkspace] = useState(project.workspace || '');
   const [iconColor, setIconColor] = useState(project.iconColor || PROJECT_COLORS[0]);
+  const [emailIntakeEnabled, setEmailIntakeEnabled] = useState(Boolean(project.emailIntakeEnabled));
+  const [emailAlias, setEmailAlias] = useState(project.emailAlias || '');
+  const [emailAllowedSenders, setEmailAllowedSenders] = useState((project.emailAllowedSenders || []).join('\n'));
+  const [emailIngestBehavior, setEmailIngestBehavior] = useState(project.emailIngestBehavior || 'save');
+  const [emailHistory, setEmailHistory] = useState<ProjectEmailIngestHistoryItem[]>([]);
 
   const [contextBody, setContextBody] = useState('');
   const [rulesBody, setRulesBody] = useState('');
@@ -55,13 +94,22 @@ const ProjectSettingsDrawer: React.FC<{
     setDescription(project.description || '');
     setWorkspace(project.workspace || '');
     setIconColor(project.iconColor || PROJECT_COLORS[0]);
+    setEmailIntakeEnabled(Boolean(project.emailIntakeEnabled));
+    setEmailAlias(project.emailAlias || '');
+    setEmailAllowedSenders((project.emailAllowedSenders || []).join('\n'));
+    setEmailIngestBehavior(project.emailIngestBehavior || 'save');
+    setEmailHistory([]);
     setLoading(true);
     void (async () => {
       try {
-        const k = await ipcBridge.project.readKnowledge.invoke({ id: project.id });
+        const [k, history] = await Promise.all([
+          ipcBridge.project.readKnowledge.invoke({ id: project.id }),
+          ipcBridge.project.readEmailIngestHistory.invoke({ id: project.id }),
+        ]);
         setContextBody(k.context || '');
         setRulesBody(k.rules || '');
         setDecisionsBody(k.decisions || '');
+        setEmailHistory(history);
         setEditorKey((n) => n + 1);
       } catch (err) {
         console.error('[ProjectSettingsDrawer] load failed:', err);
@@ -84,19 +132,53 @@ const ProjectSettingsDrawer: React.FC<{
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await ipcBridge.project.update.invoke({
-        id: project.id,
-        updates: {
-          name: name.trim(),
-          description: description.trim() || undefined,
-          workspace: workspace.trim() || undefined,
-          iconColor,
-        },
+      const updates = {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        workspace: workspace.trim() || undefined,
+        iconColor,
+        emailIntakeEnabled,
+        emailAlias: normalizeAlias(emailAlias),
+        emailAllowedSenders: parseSenderList(emailAllowedSenders),
+        emailIngestBehavior,
+      };
+      const saveNative = async () => {
+        await ipcBridge.project.update.invoke({ id: project.id, updates });
+        // Knowledge docs only persist when there is a workspace to write into.
+        if (workspace.trim()) {
+          await ipcBridge.project.writeKnowledge.invoke({ id: project.id, kind: 'context', content: contextBody });
+          await ipcBridge.project.writeKnowledge.invoke({ id: project.id, kind: 'rules', content: rulesBody });
+        }
+      };
+
+      const response = await fetch('/wl-project/settings/save', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          id: project.id,
+          updates,
+          knowledge: {
+            context: contextBody,
+            rules: rulesBody,
+          },
+        }),
       });
-      // Knowledge docs only persist when there is a workspace to write into.
-      if (workspace.trim()) {
-        await ipcBridge.project.writeKnowledge.invoke({ id: project.id, kind: 'context', content: contextBody });
-        await ipcBridge.project.writeKnowledge.invoke({ id: project.id, kind: 'rules', content: rulesBody });
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status === 404 && contentType.includes('text/html')) {
+          await saveNative();
+          Message.success(t('projects.settings.saved'));
+          onSaved();
+          onClose();
+          return;
+        }
+        const error = contentType.includes('application/json') ? await response.json().catch((): null => null) : null;
+        throw new Error(error?.error || 'wl-project-settings-save-failed');
+      }
+      const saved = await response.json().catch((): null => null);
+      if (!saved?.ok) {
+        await saveNative();
       }
       Message.success(t('projects.settings.saved'));
       onSaved();
@@ -106,7 +188,32 @@ const ProjectSettingsDrawer: React.FC<{
     } finally {
       setSaving(false);
     }
-  }, [name, description, workspace, iconColor, contextBody, rulesBody, project.id, onSaved, onClose, t]);
+  }, [
+    name,
+    description,
+    workspace,
+    iconColor,
+    emailIntakeEnabled,
+    emailAlias,
+    emailAllowedSenders,
+    emailIngestBehavior,
+    contextBody,
+    rulesBody,
+    project.id,
+    onSaved,
+    onClose,
+    t,
+  ]);
+
+  const addAllowedSenderBreak = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!(event.key === 'Enter' || event.key === ',' || event.key === ';')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setEmailAllowedSenders((current) => {
+      const trimmed = current.replace(/[,\s;]+$/g, '');
+      return trimmed ? `${trimmed}\n` : '';
+    });
+  }, []);
 
   const acceptDraft = (kind: WizardKind, draft: string) => {
     if (kind === 'context') setContextBody(draft);
@@ -120,6 +227,7 @@ const ProjectSettingsDrawer: React.FC<{
     { key: 'general', label: t('projects.settings.general') },
     { key: 'context', label: t('projects.knowledge.context.label') },
     { key: 'rules', label: t('projects.knowledge.rules.label') },
+    { key: 'email', label: t('projects.settings.email.title') },
   ];
 
   return (
@@ -224,6 +332,93 @@ const ProjectSettingsDrawer: React.FC<{
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {section === 'email' && (
+            <div className='flex flex-col gap-18px'>
+              <div className='flex items-start justify-between gap-12px rd-8px border border-solid border-2 p-14px'>
+                <div className='flex flex-col gap-4px'>
+                  <span className='text-13px font-600 text-t-primary flex items-center gap-6px'>
+                    <Inbox size={14} />
+                    {t('projects.settings.email.enableLabel')}
+                  </span>
+                  <span className='text-12px text-t-tertiary leading-5'>{t('projects.settings.email.enableHint')}</span>
+                </div>
+                <Switch checked={emailIntakeEnabled} onChange={setEmailIntakeEnabled} />
+              </div>
+
+              <div className='flex flex-col gap-6px'>
+                <span className='text-13px font-500 text-t-secondary'>{t('projects.settings.email.aliasLabel')}</span>
+                <Input
+                  value={emailAlias}
+                  onChange={(value) => setEmailAlias(normalizeAlias(value))}
+                  maxLength={64}
+                  addAfter={`@${EMAIL_DOMAIN}`}
+                  disabled={!emailIntakeEnabled}
+                />
+                <span className='text-11px text-t-tertiary leading-4'>{t('projects.settings.email.aliasHint')}</span>
+              </div>
+
+              <div className='flex flex-col gap-6px'>
+                <span className='text-13px font-500 text-t-secondary'>{t('projects.settings.email.allowedLabel')}</span>
+                <Input.TextArea
+                  value={emailAllowedSenders}
+                  onChange={setEmailAllowedSenders}
+                  onKeyDown={addAllowedSenderBreak}
+                  disabled={!emailIntakeEnabled}
+                  autoSize={{ minRows: 3, maxRows: 6 }}
+                  placeholder={t('projects.settings.email.allowedPlaceholder')}
+                />
+                <span className='text-11px text-t-tertiary leading-4'>{t('projects.settings.email.allowedHint')}</span>
+              </div>
+
+              <div className='flex flex-col gap-6px'>
+                <span className='text-13px font-500 text-t-secondary'>{t('projects.settings.email.behaviorLabel')}</span>
+                <Select value={emailIngestBehavior} onChange={setEmailIngestBehavior} disabled={!emailIntakeEnabled}>
+                  <Select.Option value='save'>{t('projects.settings.email.behaviorSave')}</Select.Option>
+                  <Select.Option value='save-and-notify'>{t('projects.settings.email.behaviorNotify')}</Select.Option>
+                  <Select.Option value='save-and-summarize'>{t('projects.settings.email.behaviorSummarize')}</Select.Option>
+                  <Select.Option value='save-add-to-knowledge'>{t('projects.settings.email.behaviorKnowledge')}</Select.Option>
+                  <Select.Option value='act-on-instructions'>{t('projects.settings.email.behaviorAct')}</Select.Option>
+                  <Select.Option value='act-add-knowledge-and-references'>
+                    {t('projects.settings.email.behaviorActKnowledgeReferences')}
+                  </Select.Option>
+                </Select>
+              </div>
+
+              <div className='flex flex-col gap-8px'>
+                <div className='flex items-center justify-between gap-8px'>
+                  <span className='text-13px font-500 text-t-secondary'>{t('projects.settings.email.historyLabel')}</span>
+                  <span className='text-11px text-t-tertiary'>{t('projects.settings.email.historyCount', { count: emailHistory.length })}</span>
+                </div>
+                {emailHistory.length === 0 ? (
+                  <div className='rd-8px border border-dashed border-2 px-14px py-18px text-12px text-t-tertiary text-center'>
+                    {t('projects.settings.email.historyEmpty')}
+                  </div>
+                ) : (
+                  <div className='flex flex-col gap-8px'>
+                    {emailHistory.slice(0, 8).map((item) => (
+                      <div key={item.id} className='rd-8px border border-solid border-2 p-10px flex flex-col gap-6px'>
+                        <div className='flex items-center justify-between gap-8px'>
+                          <span className='text-13px font-500 truncate' title={item.subject}>
+                            {item.subject}
+                          </span>
+                          <Tag color={item.status === 'saved' ? 'green' : item.status === 'failed' ? 'red' : 'orange'}>
+                            {t(`projects.settings.email.status.${item.status}`)}
+                          </Tag>
+                        </div>
+                        <div className='text-11px text-t-tertiary truncate'>
+                          {item.from || t('projects.settings.email.unknownSender')} ·{' '}
+                          {new Date(item.receivedAt).toLocaleString()} ·{' '}
+                          {t('projects.settings.email.filesSaved', { count: item.referenceFiles.length })}
+                        </div>
+                        {item.reason && <div className='text-11px text-status-danger'>{item.reason}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
