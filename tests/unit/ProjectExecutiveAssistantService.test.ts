@@ -153,7 +153,7 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(outbound.error).toContain('US A2P 10DLC');
   });
 
-  it('adds the no-inbound-replies notice to Project Assistant SMS bodies', () => {
+  it('adds the opt-out notice to Project Assistant SMS bodies', () => {
     expect(formatProjectOutboundBody('sms', 'Checking in on the file.')).toBe(
       `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`,
     );

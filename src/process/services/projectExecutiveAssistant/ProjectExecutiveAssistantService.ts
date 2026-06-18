@@ -23,7 +23,7 @@ import { WAYLAND_KNOWLEDGE_DIR } from '@process/services/projectKnowledge/bootst
 
 const EA_FILE = 'executive-assistant.json';
 const MAX_OUTBOUND_RECORDS = 500;
-export const SMS_OUTBOUND_ONLY_NOTICE = 'Note: This number cannot receive inbound messages.';
+export const SMS_OUTBOUND_ONLY_NOTICE = 'Reply STOP to opt out. For help, contact your AerdiA project contact.';
 
 const DEFAULT_STATE: ProjectExecutiveAssistantState = {
   contacts: [],
