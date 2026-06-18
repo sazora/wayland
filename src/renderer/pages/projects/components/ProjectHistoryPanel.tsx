@@ -5,9 +5,11 @@
  */
 
 import type { TChatConversation } from '@/common/config/storage';
+import { ipcBridge } from '@/common';
 import type { IProject } from '@/common/types/project';
+import type { ProjectOutboundMessage } from '@/common/types/projectExecutiveAssistant';
 import { Button } from '@arco-design/web-react';
-import { ArrowRight, Ban, Clock3, DownloadCloud, FileText, Mail, MessageSquare } from 'lucide-react';
+import { ArrowRight, Ban, Clock3, DownloadCloud, FileText, Mail, MessageSquare, Send } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './projectCards.module.css';
@@ -49,9 +51,10 @@ type HistoryKind =
   | 'remote-import'
   | 'remote-ignore'
   | 'remote-pending'
+  | 'outbound'
   | 'inventory';
 
-type HistoryFilter = 'all' | 'chat' | 'email' | 'reference' | 'remote';
+type HistoryFilter = 'all' | 'chat' | 'email' | 'reference' | 'remote' | 'outbound';
 
 type HistoryItem = {
   id: string;
@@ -115,6 +118,7 @@ async function parseEmailHistoryResponse(response: Response): Promise<EmailInges
 function iconFor(kind: HistoryKind): React.ReactNode {
   if (kind === 'chat') return <MessageSquare size={15} />;
   if (kind === 'email') return <Mail size={15} />;
+  if (kind === 'outbound') return <Send size={15} />;
   if (kind === 'reference' || kind === 'inventory') return <FileText size={15} />;
   if (kind === 'remote-import' || kind === 'remote-pending') return <DownloadCloud size={15} />;
   if (kind === 'remote-ignore') return <Ban size={15} />;
@@ -133,6 +137,7 @@ function buildHistoryItems(
   conversations: TChatConversation[],
   emailHistory: EmailIngestRecord[],
   references: ReferenceFile[],
+  outbound: ProjectOutboundMessage[],
 ): HistoryItem[] {
   const items: HistoryItem[] = [];
   const knownReferenceNames = new Set<string>();
@@ -302,6 +307,32 @@ function buildHistoryItems(
     });
   }
 
+  for (const message of outbound) {
+    items.push({
+      id: `outbound-${message.id}`,
+      kind: 'outbound',
+      time: normalizeTime(message.sentAt ?? message.failedAt ?? message.modifyTime ?? message.createTime),
+      title: message.subject || `Outbound ${message.channel}`,
+      eyebrow: 'Outbound',
+      summary:
+        message.status === 'sent'
+          ? `WL sent this ${message.channel} message to ${message.contactName || message.to}.`
+          : message.status === 'failed'
+            ? `WL tried to send this ${message.channel} message to ${message.contactName || message.to}, but the send failed.`
+            : `WL created this ${message.channel} draft for ${message.contactName || message.to}.`,
+      detail: `To ${message.contactName ? `${message.contactName} · ` : ''}${message.to}`,
+      meta: compact([message.status, message.provider, message.error]),
+      related: [
+        { label: 'Channel', value: message.channel },
+        { label: 'To', value: message.to },
+        { label: 'Status', value: message.status },
+        ...(message.contactName ? [{ label: 'Contact', value: message.contactName }] : []),
+        ...(message.provider ? [{ label: 'Provider', value: message.provider }] : []),
+        ...(message.error ? [{ label: 'Error', value: message.error }] : []),
+      ],
+    });
+  }
+
   for (const reference of references) {
     if (knownReferenceNames.has(reference.name)) continue;
     items.push({
@@ -329,6 +360,7 @@ const ProjectHistoryPanel: React.FC<{
   const navigate = useNavigate();
   const [emailHistory, setEmailHistory] = useState<EmailIngestRecord[]>([]);
   const [references, setReferences] = useState<ReferenceFile[]>([]);
+  const [outbound, setOutbound] = useState<ProjectOutboundMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>('all');
@@ -341,9 +373,10 @@ const ProjectHistoryPanel: React.FC<{
     }
     setLoading(true);
     try {
-      const [referenceResponse, historyResponse] = await Promise.all([
+      const [referenceResponse, historyResponse, assistantState] = await Promise.all([
         fetch(`/wl-project/reference?id=${encodeURIComponent(project.id)}`, { credentials: 'include' }),
         fetch(`/api/project-email-ingest/history?id=${encodeURIComponent(project.id)}`, { credentials: 'include' }),
+        ipcBridge.project.readExecutiveAssistant.invoke({ id: project.id }),
       ]);
       const [nextReferences, nextHistory] = await Promise.all([
         parseReferenceResponse(referenceResponse),
@@ -351,6 +384,7 @@ const ProjectHistoryPanel: React.FC<{
       ]);
       setReferences(nextReferences);
       setEmailHistory(nextHistory);
+      setOutbound(assistantState.outbound);
     } catch (err) {
       console.warn('[ProjectHistoryPanel] history load failed:', err);
     } finally {
@@ -363,8 +397,8 @@ const ProjectHistoryPanel: React.FC<{
   }, [load]);
 
   const items = useMemo(
-    () => buildHistoryItems(project, conversations, emailHistory, references),
-    [project, conversations, emailHistory, references],
+    () => buildHistoryItems(project, conversations, emailHistory, references, outbound),
+    [project, conversations, emailHistory, references, outbound],
   );
 
   const visibleItems = useMemo(() => items.filter((item) => itemMatchesFilter(item, filter)), [items, filter]);
@@ -388,8 +422,9 @@ const ProjectHistoryPanel: React.FC<{
       emails: emailHistory.length,
       references: references.length,
       remotes: emailHistory.reduce((count, record) => count + (record.remoteAttachmentLinks?.length ?? 0), 0),
+      outbound: outbound.length,
     }),
-    [conversations.length, emailHistory, items.length, references.length],
+    [conversations.length, emailHistory, items.length, references.length, outbound.length],
   );
 
   const filterOptions: Array<{ key: HistoryFilter; label: string; count: number }> = [
@@ -398,6 +433,7 @@ const ProjectHistoryPanel: React.FC<{
     { key: 'email', label: 'emails', count: stats.emails },
     { key: 'reference', label: 'refs', count: stats.references },
     { key: 'remote', label: 'remote', count: stats.remotes },
+    { key: 'outbound', label: 'sent/drafts', count: stats.outbound },
   ];
 
   if (loading) return null;

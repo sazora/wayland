@@ -19,6 +19,7 @@ import {
   Paperclip,
   Settings,
   TriangleAlert,
+  UserRoundCog,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -28,7 +29,7 @@ import { useAllCronJobs } from '@/renderer/pages/cron/useCronJobs';
 import type { SettingsSection } from './ProjectSettingsDrawer';
 import styles from './projectCards.module.css';
 
-type ProjectTab = 'overview' | 'chats' | 'reports' | 'files' | 'reference' | 'memory' | 'history';
+type ProjectTab = 'overview' | 'chats' | 'reports' | 'files' | 'reference' | 'memory' | 'history' | 'assistant';
 
 type Props = {
   project: IProject;
@@ -311,7 +312,7 @@ const ProjectCockpitPanel: React.FC<Props> = ({
             </p>
           </div>
         </div>
-        <div className={`grid gap-10px md:grid-cols-6 ${styles.cockpitActions}`}>
+        <div className={`grid gap-10px md:grid-cols-7 ${styles.cockpitActions}`}>
           <Button className={styles.cockpitActionButton} icon={<MessageSquarePlus size={14} />} onClick={onNewChat}>
             {t('projects.cockpit.actionChat', 'Chat')}
           </Button>
@@ -330,6 +331,9 @@ const ProjectCockpitPanel: React.FC<Props> = ({
             onClick={() => navigate(`/scheduled?projectId=${encodeURIComponent(project.id)}&projectName=${encodeURIComponent(project.name)}&prompt=${reportPrompt}`)}
           >
             {t('projects.cockpit.actionReport', 'Report')}
+          </Button>
+          <Button className={styles.cockpitActionButton} icon={<UserRoundCog size={14} />} onClick={() => onSelectTab('assistant')}>
+            {t('projects.workspace.tabAssistant', 'Assistant')}
           </Button>
           <Button className={styles.cockpitActionButton} icon={<Settings size={14} />} onClick={() => onOpenSettings('general')}>
             {t('projects.workspace.settings')}

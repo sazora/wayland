@@ -51,6 +51,15 @@ import type {
   MeetingDeliveryRecord,
 } from '../types/meetings';
 import type { ProjectEmailIngestRecord } from '../../process/services/projectEmailIntake/ProjectEmailIntakeService';
+import type {
+  CreateProjectContactParams,
+  CreateProjectOutboundParams,
+  ProjectContact,
+  ProjectExecutiveAssistantState,
+  ProjectOutboundCapability,
+  ProjectOutboundMessage,
+  UpdateProjectContactParams,
+} from '@/common/types/projectExecutiveAssistant';
 import type { ImportResult } from '../../process/services/skills/SkillImport';
 import type { KickoffResult, KickoffTelemetryEvent } from '../../process/services/kickoff/types';
 import type {
@@ -2588,6 +2597,23 @@ export const project = {
     { ok: true } | { ok: false; error: string },
     { id: string; ingestId: string; url: string }
   >('project.ignore-email-remote-attachment'),
+  /** Read project executive-assistant contacts and outbound communication history. */
+  readExecutiveAssistant: buildProvider<ProjectExecutiveAssistantState, { id: string }>(
+    'project.read-executive-assistant'
+  ),
+  /** Read which outbound channels can currently send. */
+  readOutboundCapabilities: buildProvider<ProjectOutboundCapability[], void>('project.read-outbound-capabilities'),
+  createContact: buildProvider<ProjectContact, { id: string; contact: CreateProjectContactParams }>('project.create-contact'),
+  updateContact: buildProvider<ProjectContact, { id: string; contactId: string; updates: UpdateProjectContactParams }>(
+    'project.update-contact'
+  ),
+  removeContact: buildProvider<void, { id: string; contactId: string }>('project.remove-contact'),
+  createOutbound: buildProvider<ProjectOutboundMessage, { id: string; message: CreateProjectOutboundParams }>(
+    'project.create-outbound'
+  ),
+  approveOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.approve-outbound'),
+  cancelOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.cancel-outbound'),
+  sendOutbound: buildProvider<ProjectOutboundMessage, { id: string; messageId: string }>('project.send-outbound'),
   /**
    * Fired whenever the project list or a project's membership changes.
    *

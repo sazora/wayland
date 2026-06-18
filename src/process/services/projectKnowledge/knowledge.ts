@@ -12,6 +12,7 @@ import { OfficeParser } from 'officeparser';
 import { WAYLAND_KNOWLEDGE_DIR } from './bootstrap';
 import { confinePath } from '@process/bridge/pathConfinement';
 import { resolveWithinApprovedDirectory } from '@process/bridge/userApprovedPaths';
+import { readProjectExecutiveAssistant } from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
 
 const execFileAsync = promisify(execFile);
 
@@ -350,6 +351,43 @@ const loadProjectReferenceSections = async (workspace: string): Promise<string[]
   return sections;
 };
 
+const loadExecutiveAssistantSection = async (workspace: string): Promise<string> => {
+  try {
+    const state = await readProjectExecutiveAssistant(workspace);
+    const contacts = state.contacts
+      .filter((contact) => contact.approved)
+      .slice(0, 40)
+      .map((contact) =>
+        [
+          `- ${contact.name}`,
+          contact.role ? `  Role: ${contact.role}` : undefined,
+          contact.company ? `  Company: ${contact.company}` : undefined,
+          contact.email ? `  Email: ${contact.email}` : undefined,
+          contact.phone ? `  Phone: ${contact.phone}` : undefined,
+          `  Preferred channel: ${contact.preferredChannel}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    const openMessages = state.outbound
+      .filter((message) => message.status === 'draft' || message.status === 'pending-approval' || message.status === 'failed')
+      .slice(0, 20)
+      .map((message) => `- ${message.status}: ${message.channel} to ${message.contactName || message.to}${message.subject ? ` - ${message.subject}` : ''}`);
+    if (contacts.length === 0 && openMessages.length === 0) return '';
+    return [
+      '## Project executive assistant context',
+      '',
+      'Approved contacts and open outbound drafts for this project. Use these to draft communication accurately. External messages must still be reviewed/sent through the project Assistant tab unless an explicit outbound tool is available.',
+      contacts.length ? ['', '### Approved contacts', contacts.join('\n')].join('\n') : '',
+      openMessages.length ? ['', '### Open outbound messages', openMessages.join('\n')].join('\n') : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  } catch {
+    return '';
+  }
+};
+
 /**
  * Compose the project's substantive knowledge into a single block ready to
  * append to a conversation's system-rules channel. Returns '' when the project
@@ -362,6 +400,8 @@ export async function loadProjectKnowledgeBlock(workspace: string): Promise<stri
     const body = substantive(k[kind]);
     if (body) sections.push(`## ${INJECT_LABEL[kind]}\n\n${body}`);
   });
+  const executiveAssistant = await loadExecutiveAssistantSection(workspace);
+  if (executiveAssistant) sections.push(executiveAssistant);
   sections.push(...(await loadProjectReferenceSections(workspace)));
   if (sections.length === 0) return '';
   return `[Project Knowledge - shared context for every chat in this project]\n\n${sections.join('\n\n')}`;

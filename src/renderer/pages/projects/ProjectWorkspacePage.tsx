@@ -24,6 +24,7 @@ import {
   Pin,
   PinOff,
   Settings as SettingsIcon,
+  UserRoundCog,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -36,9 +37,10 @@ import ProjectMemoryPanel from './components/ProjectMemoryPanel';
 import ProjectHistoryPanel from './components/ProjectHistoryPanel';
 import ProjectCockpitPanel from './components/ProjectCockpitPanel';
 import ProjectReportsPanel from './components/ProjectReportsPanel';
+import ProjectExecutiveAssistantPanel from './components/ProjectExecutiveAssistantPanel';
 import styles from './components/projectCards.module.css';
 
-type ProjectTab = 'overview' | 'chats' | 'reports' | 'files' | 'reference' | 'memory' | 'history';
+type ProjectTab = 'overview' | 'chats' | 'reports' | 'files' | 'reference' | 'memory' | 'history' | 'assistant';
 
 /** Strip seeded heading/blockquote boilerplate to decide if instructions are real. */
 const hasContent = (raw: string): boolean =>
@@ -251,6 +253,7 @@ const ProjectWorkspacePage: React.FC = () => {
     { key: 'reference', label: t('projects.workspace.tabReference'), icon: <Paperclip size={15} /> },
     { key: 'memory', label: t('projects.workspace.tabMemory'), icon: <NotebookPen size={15} /> },
     { key: 'history', label: t('projects.workspace.tabHistory', 'History'), icon: <History size={15} /> },
+    { key: 'assistant', label: t('projects.workspace.tabAssistant', 'Assistant'), icon: <UserRoundCog size={15} /> },
   ];
 
   return (
@@ -513,6 +516,16 @@ const ProjectWorkspacePage: React.FC = () => {
         {activeTab === 'history' && project && (
           <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
             <ProjectHistoryPanel project={project} conversations={conversations} />
+          </div>
+        )}
+
+        {activeTab === 'assistant' && project && (
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+            <ProjectExecutiveAssistantPanel
+              projectId={projectId || ''}
+              hasWorkspace={!!project.workspace}
+              onSetWorkspace={() => openSettings('general')}
+            />
           </div>
         )}
       </div>

@@ -24,6 +24,17 @@ import {
   importProjectEmailRemoteAttachment,
   readProjectEmailIngestHistory,
 } from '@process/services/projectEmailIntake/ProjectEmailIntakeService';
+import {
+  approveProjectOutbound,
+  cancelProjectOutbound,
+  createProjectContact,
+  createProjectOutbound,
+  projectOutboundCapabilities,
+  readProjectExecutiveAssistant,
+  removeProjectContact,
+  sendProjectOutbound,
+  updateProjectContact,
+} from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
 import { hasUsableModel, oneShotComplete, pickBestModel } from '@process/services/completion/oneShot';
 
 /** Prompt the cheap model with a knowledge doc and ask for a single-sentence summary. */
@@ -307,5 +318,48 @@ export function initProjectBridge(): void {
     const result = await ignoreProjectEmailRemoteAttachment(project.workspace, ingestId, url);
     if (result.ok === false) return { ok: false, error: result.error };
     return { ok: true };
+  });
+
+  ipcBridge.project.readExecutiveAssistant.provider(async ({ id }) => {
+    const project = await projectService.getProject(id);
+    if (!project?.workspace) return { contacts: [], outbound: [] };
+    return readProjectExecutiveAssistant(project.workspace);
+  });
+
+  ipcBridge.project.readOutboundCapabilities.provider(async () => projectOutboundCapabilities());
+
+  ipcBridge.project.createContact.provider(async ({ id, contact }) => {
+    const workspace = await requireWorkspace(id);
+    return createProjectContact(workspace, contact);
+  });
+
+  ipcBridge.project.updateContact.provider(async ({ id, contactId, updates }) => {
+    const workspace = await requireWorkspace(id);
+    return updateProjectContact(workspace, contactId, updates);
+  });
+
+  ipcBridge.project.removeContact.provider(async ({ id, contactId }) => {
+    const workspace = await requireWorkspace(id);
+    await removeProjectContact(workspace, contactId);
+  });
+
+  ipcBridge.project.createOutbound.provider(async ({ id, message }) => {
+    const workspace = await requireWorkspace(id);
+    return createProjectOutbound(workspace, message);
+  });
+
+  ipcBridge.project.approveOutbound.provider(async ({ id, messageId }) => {
+    const workspace = await requireWorkspace(id);
+    return approveProjectOutbound(workspace, messageId);
+  });
+
+  ipcBridge.project.cancelOutbound.provider(async ({ id, messageId }) => {
+    const workspace = await requireWorkspace(id);
+    return cancelProjectOutbound(workspace, messageId);
+  });
+
+  ipcBridge.project.sendOutbound.provider(async ({ id, messageId }) => {
+    const workspace = await requireWorkspace(id);
+    return sendProjectOutbound(workspace, messageId);
   });
 }
