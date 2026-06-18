@@ -41,7 +41,17 @@ type EmailIngestRecord = {
   remoteAttachmentLinks?: RemoteAttachmentLink[];
 };
 
-type HistoryKind = 'project' | 'chat' | 'email' | 'reference' | 'remote-import' | 'remote-ignore' | 'inventory';
+type HistoryKind =
+  | 'project'
+  | 'chat'
+  | 'email'
+  | 'reference'
+  | 'remote-import'
+  | 'remote-ignore'
+  | 'remote-pending'
+  | 'inventory';
+
+type HistoryFilter = 'all' | 'chat' | 'email' | 'reference' | 'remote';
 
 type HistoryItem = {
   id: string;
@@ -106,9 +116,16 @@ function iconFor(kind: HistoryKind): React.ReactNode {
   if (kind === 'chat') return <MessageSquare size={15} />;
   if (kind === 'email') return <Mail size={15} />;
   if (kind === 'reference' || kind === 'inventory') return <FileText size={15} />;
-  if (kind === 'remote-import') return <DownloadCloud size={15} />;
+  if (kind === 'remote-import' || kind === 'remote-pending') return <DownloadCloud size={15} />;
   if (kind === 'remote-ignore') return <Ban size={15} />;
   return <Clock3 size={15} />;
+}
+
+function itemMatchesFilter(item: HistoryItem, filter: HistoryFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'reference') return item.kind === 'reference' || item.kind === 'inventory';
+  if (filter === 'remote') return item.kind === 'remote-import' || item.kind === 'remote-ignore' || item.kind === 'remote-pending';
+  return item.kind === filter;
 }
 
 function buildHistoryItems(
@@ -260,6 +277,28 @@ function buildHistoryItems(
           ],
         });
       }
+      if (!link.status || link.status === 'pending' || link.status === 'failed') {
+        const failed = link.status === 'failed';
+        items.push({
+          id: `remote-pending-${record.id}-${index}`,
+          kind: 'remote-pending',
+          time: receivedAt,
+          title: failed ? 'Remote attachment import failed' : 'Remote attachment captured',
+          eyebrow: 'Remote attachment',
+          summary: failed
+            ? `WL tried to import a captured remote attachment from "${emailTitle}", but the download failed. It can be retried from the References remote attachment queue.`
+            : `WL captured a Mail Drop or remote attachment link from "${emailTitle}". It is waiting to be imported into references or excluded.`,
+          detail: label,
+          meta: compact([link.size, failed ? link.lastError : undefined, record.subject]),
+          related: [
+            { label: 'Attachment', value: label },
+            { label: 'Source email', value: emailTitle },
+            { label: 'Status', value: link.status || 'pending' },
+            ...(link.size ? [{ label: 'Reported size', value: link.size }] : []),
+            ...(link.lastError ? [{ label: 'Last error', value: link.lastError }] : []),
+          ],
+        });
+      }
     });
   }
 
@@ -292,6 +331,7 @@ const ProjectHistoryPanel: React.FC<{
   const [references, setReferences] = useState<ReferenceFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<HistoryFilter>('all');
   const hasWorkspace = Boolean(project.workspace);
 
   const load = useCallback(async () => {
@@ -327,27 +367,38 @@ const ProjectHistoryPanel: React.FC<{
     [project, conversations, emailHistory, references],
   );
 
+  const visibleItems = useMemo(() => items.filter((item) => itemMatchesFilter(item, filter)), [items, filter]);
+
   useEffect(() => {
-    if (items.length === 0) {
+    if (visibleItems.length === 0) {
       if (selectedId) setSelectedId(null);
       return;
     }
-    if (!selectedId || !items.some((item) => item.id === selectedId)) {
-      setSelectedId(items[0].id);
+    if (!selectedId || !visibleItems.some((item) => item.id === selectedId)) {
+      setSelectedId(visibleItems[0].id);
     }
-  }, [items, selectedId]);
+  }, [visibleItems, selectedId]);
 
-  const selected = items.find((item) => item.id === selectedId) ?? items[0];
+  const selected = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0];
 
   const stats = useMemo(
     () => ({
+      all: items.length,
       chats: conversations.length,
       emails: emailHistory.length,
       references: references.length,
       remotes: emailHistory.reduce((count, record) => count + (record.remoteAttachmentLinks?.length ?? 0), 0),
     }),
-    [conversations.length, emailHistory, references.length],
+    [conversations.length, emailHistory, items.length, references.length],
   );
+
+  const filterOptions: Array<{ key: HistoryFilter; label: string; count: number }> = [
+    { key: 'all', label: 'All', count: stats.all },
+    { key: 'chat', label: 'chats', count: stats.chats },
+    { key: 'email', label: 'emails', count: stats.emails },
+    { key: 'reference', label: 'refs', count: stats.references },
+    { key: 'remote', label: 'remote', count: stats.remotes },
+  ];
 
   if (loading) return null;
 
@@ -361,16 +412,30 @@ const ProjectHistoryPanel: React.FC<{
           </div>
         </div>
         <div className='flex flex-wrap items-center gap-6px text-11px text-t-tertiary'>
-          <span className='px-8px py-4px rd-full bg-fill-1'>{stats.chats} chats</span>
-          <span className='px-8px py-4px rd-full bg-fill-1'>{stats.emails} emails</span>
-          <span className='px-8px py-4px rd-full bg-fill-1'>{stats.references} refs</span>
-          {stats.remotes > 0 && <span className='px-8px py-4px rd-full bg-fill-1'>{stats.remotes} remote</span>}
+          {filterOptions.map((option) => {
+            const active = filter === option.key;
+            return (
+              <button
+                key={option.key}
+                type='button'
+                className='cursor-pointer px-8px py-4px rd-full border border-solid text-11px transition-colors'
+                style={{
+                  borderColor: active ? 'rgb(var(--primary-6))' : 'var(--color-border-2)',
+                  background: active ? 'var(--color-primary-light-1)' : 'var(--color-fill-1)',
+                  color: active ? 'rgb(var(--primary-6))' : 'var(--color-text-3)',
+                }}
+                onClick={() => setFilter(option.key)}
+              >
+                {option.key === 'all' ? `${option.label} ${option.count}` : `${option.count} ${option.label}`}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className='grid gap-14px lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,1.05fr)]'>
         <div className={`flex flex-col ${styles.surface}`}>
-          {items.map((item, index) => {
+          {visibleItems.map((item, index) => {
             const active = selected?.id === item.id;
             return (
               <button
@@ -446,6 +511,12 @@ const ProjectHistoryPanel: React.FC<{
           </aside>
         )}
       </div>
+
+      {visibleItems.length === 0 && (
+        <div className='rd-8px border border-dashed border-2 px-14px py-16px text-center text-12px text-t-tertiary'>
+          No history events match this filter yet.
+        </div>
+      )}
 
       {!hasWorkspace && (
         <div className='rd-8px border border-dashed border-2 px-14px py-12px text-12px text-t-tertiary'>
