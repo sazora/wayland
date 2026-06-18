@@ -76,6 +76,35 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(failed.error).toContain('No running email sender');
   });
 
+  it('auto-dispatches email and RCS drafts when approval is not required', async () => {
+    const email = await createProjectOutbound(ws, {
+      channel: 'email',
+      to: 'norman@example.com',
+      subject: 'Drone policy references',
+      body: 'We imported the reference files.',
+      requiresApproval: false,
+    });
+
+    expect(email.status).toBe('failed');
+    expect(email.requiresApproval).toBe(false);
+    expect(email.error).toContain('No running email sender');
+
+    const rcs = await createProjectOutbound(ws, {
+      channel: 'rcs',
+      to: '+14125550123',
+      body: 'Text through Twilio.',
+      requiresApproval: false,
+    });
+
+    expect(rcs.channel).toBe('sms');
+    expect(rcs.status).toBe('failed');
+    expect(rcs.requiresApproval).toBe(false);
+    expect(rcs.error).toContain('No running Twilio sender');
+
+    const state = await readProjectExecutiveAssistant(ws);
+    expect(state.outbound.map((message) => message.status)).toEqual(['failed', 'failed']);
+  });
+
   it('adds the no-inbound-replies notice to Project Assistant SMS bodies', () => {
     expect(formatProjectOutboundBody('sms', 'Checking in on the file.')).toBe(
       `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`,

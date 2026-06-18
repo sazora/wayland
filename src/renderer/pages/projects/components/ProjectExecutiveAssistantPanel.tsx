@@ -313,7 +313,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
         <section className={`p-16px ${styles.surface}`}>
           <h2 className='m-0 text-14px font-700 text-t-primary'>Draft external message</h2>
           <p className='m-0 mt-2px text-12px text-t-secondary'>
-            Create an auditable draft, approve it, then send through the configured channel.
+            Create an auditable draft, or send immediately when approval is off.
           </p>
           <div className='mt-12px grid gap-8px md:grid-cols-[160px_minmax(0,1fr)]'>
             <Select
@@ -360,7 +360,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
               onClick={createOutbound}
               disabled={!messageDraft.to.trim() || !messageDraft.body.trim()}
             >
-              Create draft
+              {messageDraft.requiresApproval ? 'Create draft' : 'Send now'}
             </Button>
           </div>
         </section>

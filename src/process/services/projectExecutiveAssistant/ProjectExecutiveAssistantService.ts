@@ -200,6 +200,9 @@ export async function createProjectOutbound(workspace: string, params: CreatePro
   state.outbound.unshift(message);
   state.outbound = state.outbound.slice(0, MAX_OUTBOUND_RECORDS);
   await writeState(workspace, state);
+  if (message.requiresApproval === false) {
+    return sendProjectOutbound(workspace, message.id);
+  }
   return message;
 }
 
