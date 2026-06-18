@@ -7,6 +7,7 @@
 import { ipcBridge } from '@/common';
 import type {
   ProjectCommunicationChannel,
+  ProjectContact,
   ProjectExecutiveAssistantState,
   ProjectOutboundCapability,
   ProjectOutboundMessage,
@@ -35,6 +36,15 @@ const channelIcon = (channel: ProjectCommunicationChannel): React.ReactNode => {
   if (channel === 'email') return <Mail size={14} />;
   if (channel === 'sms' || channel === 'rcs') return <Phone size={14} />;
   return <MessageSquareText size={14} />;
+};
+
+export const resolveContactDestination = (
+  contact: Pick<ProjectContact, 'email' | 'phone'>,
+  channel: ProjectCommunicationChannel,
+): string => {
+  if (channel === 'email') return contact.email || '';
+  if (channel === 'imessage') return contact.phone || contact.email || '';
+  return contact.phone || '';
 };
 
 const timestamp = (value?: number): string => {
@@ -97,15 +107,21 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
 
   useEffect(() => {
     if (!selectedContact) return;
+    const channel = selectedContact.preferredChannel;
     setMessageDraft((current) => ({
       ...current,
-      channel: selectedContact.preferredChannel,
-      to:
-        selectedContact.preferredChannel === 'email'
-          ? selectedContact.email || ''
-          : selectedContact.phone || selectedContact.email || '',
+      channel,
+      to: resolveContactDestination(selectedContact, channel),
     }));
   }, [selectedContact]);
+
+  const updateMessageChannel = (channel: ProjectCommunicationChannel) => {
+    setMessageDraft((draft) => ({
+      ...draft,
+      channel,
+      to: selectedContact ? resolveContactDestination(selectedContact, channel) : draft.to,
+    }));
+  };
 
   const createContact = async () => {
     try {
@@ -291,7 +307,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
               <Select
                 value={messageDraft.channel}
                 options={CHANNEL_OPTIONS}
-                onChange={(channel) => setMessageDraft((draft) => ({ ...draft, channel }))}
+                onChange={updateMessageChannel}
               />
               <Input placeholder='Recipient email or phone' value={messageDraft.to} onChange={(to) => setMessageDraft((draft) => ({ ...draft, to }))} />
             </div>
