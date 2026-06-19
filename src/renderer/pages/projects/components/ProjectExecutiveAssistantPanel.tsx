@@ -65,6 +65,9 @@ const statusTone = (status: ProjectOutboundMessage['status']): string => {
   return 'text-warning-6';
 };
 
+const pendingCount = (messages: ProjectOutboundMessage[]): number =>
+  messages.filter((message) => message.status === 'pending-approval' || message.status === 'draft' || message.status === 'failed').length;
+
 const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspace, onSetWorkspace }) => {
   const [state, setState] = useState<ProjectExecutiveAssistantState>(defaultState);
   const [capabilities, setCapabilities] = useState<ProjectOutboundCapability[]>([]);
@@ -221,30 +224,38 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
   }
 
   return (
-    <div className={`mx-auto flex max-w-1180px flex-col gap-16px ${styles.assistantPanel}`}>
-      <div className={`flex flex-wrap items-start justify-between gap-14px p-16px ${styles.surface} ${styles.assistantHero}`}>
+    <div className={`mx-auto flex max-w-1400px flex-col gap-16px ${styles.assistantPanel}`}>
+      <div className={`grid gap-14px p-16px ${styles.surface} ${styles.assistantHero}`}>
         <div>
-          <div className='text-15px font-700 text-t-primary'>Executive assistant</div>
-          <div className='mt-2px text-12px leading-relaxed text-t-secondary'>
-            Project contacts, external drafts, approval, sending, and communication history.
-          </div>
+          <div className='text-16px font-700 text-t-primary'>Project Assistant</div>
+          <div className='mt-2px text-12px leading-relaxed text-t-secondary'>Contacts, message drafting, approvals, sending, and outbound history.</div>
         </div>
-        <div className={`flex flex-wrap gap-6px ${styles.assistantCapabilityRail}`}>
-          {capabilities.map((capability) => (
-            <span
-              key={capability.channel}
-              className='inline-flex items-center gap-5px rd-full px-8px py-4px text-11px'
-              style={{
-                background: capability.available ? 'var(--color-primary-light-1)' : 'var(--color-fill-1)',
-                color: capability.available ? 'rgb(var(--primary-6))' : 'var(--color-text-3)',
-                border: '1px solid var(--color-border-2)',
-              }}
-              title={capability.note}
-            >
-              {channelIcon(capability.channel)}
-              {capability.provider || capability.channel}
-            </span>
-          ))}
+        <div className={`grid gap-8px ${styles.assistantStatusGrid}`}>
+          <div className={styles.assistantStatusTile}>
+            <span className={styles.assistantStatusValue}>{state.contacts.length}</span>
+            <span className={styles.assistantStatusLabel}>contacts</span>
+          </div>
+          <div className={styles.assistantStatusTile}>
+            <span className={styles.assistantStatusValue}>{pendingCount(state.outbound)}</span>
+            <span className={styles.assistantStatusLabel}>need action</span>
+          </div>
+          <div className={styles.assistantCapabilityRail}>
+            {capabilities.map((capability) => (
+              <span
+                key={capability.channel}
+                className='inline-flex items-center gap-5px rd-full px-8px py-4px text-11px'
+                style={{
+                  background: capability.available ? 'var(--color-primary-light-1)' : 'var(--color-fill-1)',
+                  color: capability.available ? 'rgb(var(--primary-6))' : 'var(--color-text-3)',
+                  border: '1px solid var(--color-border-2)',
+                }}
+                title={capability.note}
+              >
+                {channelIcon(capability.channel)}
+                {capability.provider || capability.channel}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -252,12 +263,12 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
         <section className={`p-16px ${styles.surface} ${styles.assistantContactsPane}`}>
           <div className='mb-12px flex items-center justify-between gap-10px'>
             <div>
-              <h2 className='m-0 text-14px font-700 text-t-primary'>Project contacts</h2>
-              <p className='m-0 mt-2px text-12px text-t-secondary'>People WL is allowed to draft or send to.</p>
+              <h2 className='m-0 text-14px font-700 text-t-primary'>Contacts</h2>
+              <p className='m-0 mt-2px text-12px text-t-secondary'>Pick a saved recipient or add a new one.</p>
             </div>
           </div>
 
-          <div className='grid gap-8px md:grid-cols-2'>
+          <div className={`grid gap-8px ${styles.assistantContactForm}`}>
             <Input placeholder='Name' value={contactDraft.name} onChange={(name) => setContactDraft((draft) => ({ ...draft, name }))} />
             <Input placeholder='Company' value={contactDraft.company} onChange={(company) => setContactDraft((draft) => ({ ...draft, company }))} />
             <Input placeholder='Role' value={contactDraft.role} onChange={(role) => setContactDraft((draft) => ({ ...draft, role }))} />
@@ -313,10 +324,8 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
         <section className={`p-16px ${styles.surface} ${styles.assistantComposerPane}`}>
           <div className='flex flex-wrap items-start justify-between gap-10px'>
             <div>
-              <h2 className='m-0 text-14px font-700 text-t-primary'>Draft external message</h2>
-              <p className='m-0 mt-2px text-12px text-t-secondary'>
-                Create an auditable draft, or send immediately when approval is off.
-              </p>
+              <h2 className='m-0 text-14px font-700 text-t-primary'>Compose</h2>
+              <p className='m-0 mt-2px text-12px text-t-secondary'>Write the message, then stage it for approval or send it immediately.</p>
             </div>
             <span className={styles.assistantModeBadge}>
               {messageDraft.requiresApproval ? 'Approval required' : 'Sends immediately'}
@@ -371,76 +380,80 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
             </Button>
           </div>
         </section>
+
+        <section className={`p-16px ${styles.surface} ${styles.assistantOutboxPane}`}>
+          <div className='mb-12px flex items-start justify-between gap-10px'>
+            <div>
+              <h2 className='m-0 text-14px font-700 text-t-primary'>Outbox</h2>
+              <p className='m-0 mt-2px text-12px text-t-secondary'>Drafts, approvals, sends, failures, and cancelled messages.</p>
+            </div>
+            <div className='flex shrink-0 items-center gap-6px'>
+              <Button
+                size='small'
+                type='text'
+                status='danger'
+                icon={<Trash2 size={13} />}
+                disabled={state.outbound.length === 0}
+                onClick={clearOutbox}
+              >
+                Clear
+              </Button>
+              <Button size='small' type='text' onClick={() => void load()}>
+                Refresh
+              </Button>
+            </div>
+          </div>
+          <div className={`flex flex-col gap-8px ${styles.assistantOutboxList}`}>
+            {state.outbound.map((message) => (
+              <div key={message.id} className={`flex flex-wrap items-start gap-12px px-12px py-10px ${styles.card} ${styles.assistantOutboxItem}`}>
+                <div className='flex h-32px w-32px shrink-0 items-center justify-center rd-8px bg-fill-2 text-t-secondary'>
+                  {channelIcon(message.channel)}
+                </div>
+                <div className='min-w-0 flex-1'>
+                  <div className='flex flex-wrap items-center gap-8px'>
+                    <span className='text-13px font-700 text-t-primary'>{message.subject || message.to}</span>
+                    <span className={`text-11px font-700 uppercase ${statusTone(message.status)}`}>{message.status}</span>
+                    <span className='text-11px text-t-tertiary'>{timestamp(message.sentAt || message.failedAt || message.createTime)}</span>
+                  </div>
+                  <div className='mt-2px text-12px text-t-secondary'>
+                    To {message.contactName ? `${message.contactName} · ` : ''}
+                    {message.to}
+                  </div>
+                  <div className='mt-3px line-clamp-2 text-12px leading-18px text-t-tertiary'>{message.body}</div>
+                  {message.error && <div className='mt-3px text-11px text-danger-6'>{message.error}</div>}
+                </div>
+                <div className='flex shrink-0 flex-wrap gap-6px'>
+                  {(message.status === 'pending-approval' || message.status === 'draft' || message.status === 'failed') && (
+                    <Button
+                      size='small'
+                      type='primary'
+                      loading={sendingId === message.id}
+                      icon={<Check size={13} />}
+                      onClick={() => void approveAndSend(message)}
+                    >
+                      Send
+                    </Button>
+                  )}
+                  {(message.status === 'pending-approval' || message.status === 'draft' || message.status === 'failed') && (
+                    <Button size='small' icon={<X size={13} />} onClick={() => void cancel(message.id)}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {state.outbound.length === 0 && (
+              <div className='rd-8px border border-dashed border-2 px-12px py-14px text-center text-12px text-t-tertiary'>
+                No outbound messages yet.
+              </div>
+            )}
+          </div>
+        </section>
       </div>
 
-      <section className={`p-16px ${styles.surface} ${styles.assistantOutboxPane}`}>
-        <div className='mb-12px flex items-center justify-between gap-10px'>
-          <div>
-            <h2 className='m-0 text-14px font-700 text-t-primary'>Assistant outbox</h2>
-            <p className='m-0 mt-2px text-12px text-t-secondary'>Drafts, approvals, sends, failures, and cancelled messages.</p>
-          </div>
-          <div className='flex items-center gap-6px'>
-            <Button
-              size='small'
-              type='text'
-              status='danger'
-              icon={<Trash2 size={13} />}
-              disabled={state.outbound.length === 0}
-              onClick={clearOutbox}
-            >
-              Clear
-            </Button>
-            <Button size='small' type='text' onClick={() => void load()}>
-              Refresh
-            </Button>
-          </div>
-        </div>
-        <div className={`flex flex-col gap-8px ${styles.assistantOutboxList}`}>
-          {state.outbound.map((message) => (
-            <div key={message.id} className={`flex flex-wrap items-start gap-12px px-12px py-10px ${styles.card} ${styles.assistantOutboxItem}`}>
-              <div className='flex h-32px w-32px shrink-0 items-center justify-center rd-8px bg-fill-2 text-t-secondary'>
-                {channelIcon(message.channel)}
-              </div>
-              <div className='min-w-0 flex-1'>
-                <div className='flex flex-wrap items-center gap-8px'>
-                  <span className='text-13px font-700 text-t-primary'>{message.subject || message.to}</span>
-                  <span className={`text-11px font-700 uppercase ${statusTone(message.status)}`}>{message.status}</span>
-                  <span className='text-11px text-t-tertiary'>{timestamp(message.sentAt || message.failedAt || message.createTime)}</span>
-                </div>
-                <div className='mt-2px text-12px text-t-secondary'>
-                  To {message.contactName ? `${message.contactName} · ` : ''}
-                  {message.to}
-                </div>
-                <div className='mt-3px line-clamp-2 text-12px leading-18px text-t-tertiary'>{message.body}</div>
-                {message.error && <div className='mt-3px text-11px text-danger-6'>{message.error}</div>}
-              </div>
-              <div className='flex shrink-0 flex-wrap gap-6px'>
-                {(message.status === 'pending-approval' || message.status === 'draft' || message.status === 'failed') && (
-                  <Button
-                    size='small'
-                    type='primary'
-                    loading={sendingId === message.id}
-                    icon={<Check size={13} />}
-                    onClick={() => void approveAndSend(message)}
-                  >
-                    Send
-                  </Button>
-                )}
-                {(message.status === 'pending-approval' || message.status === 'draft' || message.status === 'failed') && (
-                  <Button size='small' icon={<X size={13} />} onClick={() => void cancel(message.id)}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-          {state.outbound.length === 0 && (
-            <div className='rd-8px border border-dashed border-2 px-12px py-14px text-center text-12px text-t-tertiary'>
-              No outbound messages yet.
-            </div>
-          )}
-        </div>
-      </section>
+      <div className={`px-14px py-10px text-12px text-t-tertiary ${styles.assistantFooterNote}`}>
+        Messages stay project-scoped and auditable. SMS still requires a saved/approved recipient and Twilio availability.
+      </div>
     </div>
   );
 };

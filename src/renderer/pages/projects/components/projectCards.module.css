@@ -46,7 +46,13 @@
 .workspaceOverviewScroll,
 .workspaceAssistantScroll {
   padding-top: 28px !important;
-  padding-bottom: 72px !important;
+  padding-bottom: 96px !important;
+}
+
+.workspaceBottomSpacer {
+  height: 96px;
+  flex: 0 0 96px;
+  pointer-events: none;
 }
 
 .cockpitMetric {
@@ -97,19 +103,56 @@
 }
 
 .assistantHero {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 520px);
   align-items: flex-start;
   background:
     linear-gradient(180deg, rgb(var(--primary-6) / 0.07), transparent 62%),
     var(--color-bg-2);
 }
 
+.assistantStatusGrid {
+  grid-template-columns: repeat(2, minmax(90px, 1fr)) minmax(180px, 1.4fr);
+  align-items: stretch;
+}
+
+.assistantStatusTile {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-1);
+  padding: 10px 12px;
+}
+
+.assistantStatusValue {
+  color: var(--color-text-1);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.assistantStatusLabel {
+  color: var(--color-text-3);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
 .assistantCapabilityRail {
-  max-width: min(100%, 420px);
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-content: center;
   justify-content: flex-end;
+  gap: 6px;
 }
 
 .assistantPrimaryGrid {
-  grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.25fr) minmax(300px, 0.95fr);
   align-items: start;
 }
 
@@ -120,12 +163,17 @@
 }
 
 .assistantContactList {
-  max-height: min(420px, 44vh);
+  max-height: min(520px, 52vh);
   overflow: auto;
   padding-right: 2px;
 }
 
-.assistantComposerPane {
+.assistantContactForm {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.assistantComposerPane,
+.assistantOutboxPane {
   position: sticky;
   top: 12px;
 }
@@ -149,7 +197,7 @@
 }
 
 .assistantOutboxList {
-  max-height: min(520px, 52vh);
+  max-height: min(640px, 64vh);
   overflow: auto;
   padding-right: 2px;
 }
@@ -162,12 +210,20 @@
   box-shadow: none;
 }
 
-@media (max-width: 1023px) {
+.assistantFooterNote {
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-1);
+}
+
+@media (max-width: 1279px) {
+  .assistantHero,
   .assistantPrimaryGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .assistantComposerPane {
+  .assistantComposerPane,
+  .assistantOutboxPane {
     position: static;
   }
 
@@ -178,6 +234,16 @@
 
   .assistantCapabilityRail {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1023px) {
+  .assistantStatusGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .assistantCapabilityRail {
+    grid-column: 1 / -1;
   }
 }
 
@@ -264,7 +330,12 @@
   .workspaceOverviewScroll,
   .workspaceAssistantScroll {
     padding-top: 18px !important;
-    padding-bottom: 116px !important;
+    padding-bottom: 132px !important;
+  }
+
+  .workspaceBottomSpacer {
+    height: 132px;
+    flex-basis: 132px;
   }
 
   .cockpit {
@@ -315,6 +386,10 @@
   .assistantModeBadge {
     width: 100%;
     justify-content: center;
+  }
+
+  .assistantStatusGrid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .assistantOutboxItem {

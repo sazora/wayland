@@ -361,6 +361,7 @@ const ProjectWorkspacePage: React.FC = () => {
               onOpenSettings={openSettings}
               onSelectTab={setActiveTab}
             />
+            <div aria-hidden='true' className={styles.workspaceBottomSpacer} />
           </div>
         )}
 
@@ -526,6 +527,7 @@ const ProjectWorkspacePage: React.FC = () => {
               hasWorkspace={!!project.workspace}
               onSetWorkspace={() => openSettings('general')}
             />
+            <div aria-hidden='true' className={styles.workspaceBottomSpacer} />
           </div>
         )}
       </div>
