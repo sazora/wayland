@@ -13,7 +13,9 @@ import {
   clearProjectOutbound,
   createProjectContact,
   createProjectOutbound,
+  EMAIL_OUTBOUND_FOOTER,
   formatProjectOutboundBody,
+  PROJECT_ASSISTANT_BRAND,
   readProjectExecutiveAssistant,
   SMS_OUTBOUND_ONLY_NOTICE,
   sendProjectOutbound,
@@ -123,6 +125,34 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(state.outbound.map((message) => message.status)).toEqual(['failed', 'failed']);
   });
 
+  it('sends AgentMail email with the Project Assistant footer', async () => {
+    const sendMessage = vi.fn().mockResolvedValue('AMsent');
+    channelMocks.plugins = [
+      {
+        status: 'running',
+        type: 'email-agentmail',
+        sendMessage,
+      },
+    ];
+
+    const outbound = await createProjectOutbound(ws, {
+      channel: 'email',
+      to: 'norman@example.com',
+      subject: 'Drone policy references',
+      body: 'We imported the reference files.',
+      requiresApproval: false,
+    });
+
+    expect(outbound.status).toBe('sent');
+    expect(sendMessage).toHaveBeenCalledWith(
+      'norman@example.com',
+      expect.objectContaining({
+        subject: 'Drone policy references',
+        text: `We imported the reference files.\n\n${EMAIL_OUTBOUND_FOOTER}`,
+      }),
+    );
+  });
+
   it('marks Twilio sends as failed when the provider immediately reports undelivered', async () => {
     const sendMessage = vi.fn().mockResolvedValue('SMblocked');
     const getMessageStatus = vi.fn().mockResolvedValue({
@@ -157,13 +187,28 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(formatProjectOutboundBody('sms', 'Checking in on the file.')).toBe(
       `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`,
     );
+    expect(SMS_OUTBOUND_ONLY_NOTICE).toContain(PROJECT_ASSISTANT_BRAND);
   });
 
-  it('does not duplicate the no-inbound-replies notice or add it to other channels', () => {
+  it('upgrades legacy Project Assistant SMS footers to include CKSZ branding', () => {
+    expect(formatProjectOutboundBody('sms', 'Checking in on the file.\n\nReply HELP for help or STOP to opt out.')).toBe(
+      `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`,
+    );
+  });
+
+  it('adds the Project Assistant footer to email bodies', () => {
+    expect(formatProjectOutboundBody('email', 'Checking in on the file.')).toBe(
+      `Checking in on the file.\n\n${EMAIL_OUTBOUND_FOOTER}`,
+    );
+    expect(EMAIL_OUTBOUND_FOOTER).toContain(PROJECT_ASSISTANT_BRAND);
+  });
+
+  it('does not duplicate Project Assistant footers or add them to non-email/SMS channels', () => {
     const smsBody = `Checking in on the file.\n\n${SMS_OUTBOUND_ONLY_NOTICE}`;
+    const emailBody = `Checking in on the file.\n\n${EMAIL_OUTBOUND_FOOTER}`;
 
     expect(formatProjectOutboundBody('sms', smsBody)).toBe(smsBody);
-    expect(formatProjectOutboundBody('email', 'Checking in on the file.')).toBe('Checking in on the file.');
+    expect(formatProjectOutboundBody('email', emailBody)).toBe(emailBody);
     expect(formatProjectOutboundBody('imessage', 'Checking in on the file.')).toBe('Checking in on the file.');
     expect(formatProjectOutboundBody('rcs', 'Checking in on the file.')).toBe('Checking in on the file.');
   });

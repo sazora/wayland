@@ -23,7 +23,15 @@ import { WAYLAND_KNOWLEDGE_DIR } from '@process/services/projectKnowledge/bootst
 
 const EA_FILE = 'executive-assistant.json';
 const MAX_OUTBOUND_RECORDS = 500;
-export const SMS_OUTBOUND_ONLY_NOTICE = 'Reply HELP for help or STOP to opt out.';
+export const PROJECT_ASSISTANT_BRAND = 'CKSZ / AerdiA';
+const LEGACY_SMS_OUTBOUND_ONLY_NOTICE = 'Reply HELP for help or STOP to opt out.';
+export const SMS_OUTBOUND_ONLY_NOTICE = `${PROJECT_ASSISTANT_BRAND}: Reply HELP for help or STOP to opt out.`;
+export const EMAIL_OUTBOUND_FOOTER = [
+  '--',
+  `${PROJECT_ASSISTANT_BRAND} Project Assistant`,
+  `Project coordination message from ${PROJECT_ASSISTANT_BRAND}.`,
+  'If this reached you in error, reply to this email and let us know.',
+].join('\n');
 
 const DEFAULT_STATE: ProjectExecutiveAssistantState = {
   contacts: [],
@@ -61,8 +69,15 @@ const normalizeTarget = (channel: ProjectCommunicationChannel, value: string): s
 
 export const formatProjectOutboundBody = (channel: ProjectCommunicationChannel, body: string): string => {
   const trimmed = body.trim();
+  if (channel === 'email') {
+    if (trimmed.includes(EMAIL_OUTBOUND_FOOTER)) return trimmed;
+    return `${trimmed}\n\n${EMAIL_OUTBOUND_FOOTER}`;
+  }
   if (channel !== 'sms') return trimmed;
   if (trimmed.includes(SMS_OUTBOUND_ONLY_NOTICE)) return trimmed;
+  if (trimmed.includes(LEGACY_SMS_OUTBOUND_ONLY_NOTICE)) {
+    return trimmed.replace(LEGACY_SMS_OUTBOUND_ONLY_NOTICE, SMS_OUTBOUND_ONLY_NOTICE);
+  }
   return `${trimmed}\n\n${SMS_OUTBOUND_ONLY_NOTICE}`;
 };
 

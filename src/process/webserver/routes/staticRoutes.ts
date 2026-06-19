@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Express, Request, Response } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
 import express from 'express';
 import http from 'http';
 import path from 'path';
@@ -29,28 +29,28 @@ const LEGAL_UPDATED = 'June 18, 2026';
 
 const legalPages: Record<'privacy' | 'terms', LegalPage> = {
   privacy: {
-    title: 'AerdiA SMS Messaging Privacy Policy',
+    title: 'CKSZ / AerdiA SMS Messaging Privacy Policy',
     updated: LEGAL_UPDATED,
     intro:
-      'This policy describes SMS messages sent through Wayland Lab Project Assistant for AerdiA project coordination and customer care.',
+      'This policy describes SMS messages sent through Wayland Lab Project Assistant for CKSZ / AerdiA project coordination and customer care.',
     sections: [
       {
         heading: 'Information we collect',
         paragraphs: [
-          'AerdiA may collect a recipient name, mobile phone number, company or role, project association, message content, delivery status, and opt-out status when using Project Assistant messaging.',
+          'CKSZ / AerdiA may collect a recipient name, mobile phone number, company or role, project association, message content, delivery status, and opt-out status when using Project Assistant messaging.',
         ],
       },
       {
         heading: 'How we use SMS information',
         paragraphs: [
-          'AerdiA uses SMS information to send low-volume project coordination, scheduling, document/status requests, customer care, and related operational messages for active business or project relationships.',
+          'CKSZ / AerdiA uses SMS information to send low-volume project coordination, scheduling, document/status requests, customer care, and related operational messages for active business or project relationships.',
         ],
       },
       {
         heading: 'Mobile number sharing',
         paragraphs: [
           'Mobile phone numbers collected for SMS consent are not shared with third parties or affiliates for marketing or promotional purposes.',
-          'AerdiA may share SMS information with service providers only as needed to operate, secure, and deliver the messaging service, including telecommunications providers such as Twilio.',
+          'CKSZ / AerdiA may share SMS information with service providers only as needed to operate, secure, and deliver the messaging service, including telecommunications providers such as Twilio.',
         ],
       },
       {
@@ -62,27 +62,27 @@ const legalPages: Record<'privacy' | 'terms', LegalPage> = {
       {
         heading: 'Opt out and help',
         paragraphs: [
-          'Recipients can reply STOP to opt out of SMS messages. For help, contact your AerdiA project contact.',
+          'Recipients can reply STOP to opt out of SMS messages. For help, contact your CKSZ / AerdiA project contact.',
         ],
       },
     ],
   },
   terms: {
-    title: 'AerdiA SMS Messaging Terms and Conditions',
+    title: 'CKSZ / AerdiA SMS Messaging Terms and Conditions',
     updated: LEGAL_UPDATED,
     intro:
-      'These terms apply to SMS messages sent by AerdiA through Wayland Lab Project Assistant for project coordination and customer care.',
+      'These terms apply to SMS messages sent by CKSZ / AerdiA through Wayland Lab Project Assistant for project coordination and customer care.',
     sections: [
       {
         heading: 'Program description',
         paragraphs: [
-          'AerdiA sends low-volume SMS messages related to active business and project relationships. Messages may include project updates, scheduling reminders, document or status requests, and customer care.',
+          'CKSZ / AerdiA sends low-volume SMS messages related to active business and project relationships. Messages may include project updates, scheduling reminders, document or status requests, and customer care.',
         ],
       },
       {
         heading: 'Consent',
         paragraphs: [
-          'By providing your mobile number to AerdiA and agreeing to receive project-related text messages, you consent to receive SMS messages from AerdiA. Consent may be provided verbally, in writing, through project intake or contract forms, or by direct request to AerdiA staff.',
+          'By providing your mobile number to CKSZ / AerdiA and agreeing to receive project-related text messages, you consent to receive SMS messages from CKSZ / AerdiA. Consent may be provided verbally, in writing, through project intake or contract forms, or by direct request to CKSZ / AerdiA staff.',
         ],
       },
       {
@@ -92,7 +92,7 @@ const legalPages: Record<'privacy' | 'terms', LegalPage> = {
       {
         heading: 'Help',
         paragraphs: [
-          'For help, contact your AerdiA project contact. Replies may not be monitored except for carrier-supported opt-out handling.',
+          'For help, contact your CKSZ / AerdiA project contact. Replies may not be monitored except for carrier-supported opt-out handling.',
         ],
       },
       {
@@ -104,7 +104,7 @@ const legalPages: Record<'privacy' | 'terms', LegalPage> = {
       {
         heading: 'Privacy',
         paragraphs: [
-          'AerdiA handles SMS information according to the AerdiA SMS Messaging Privacy Policy at /privacy.',
+          'CKSZ / AerdiA handles SMS information according to the CKSZ / AerdiA SMS Messaging Privacy Policy at /privacy.',
         ],
       },
     ],
@@ -269,7 +269,7 @@ function registerProductionStaticRoutes(expressApp: Express, staticRoot: string,
     message: 'Too many requests, please try again later',
   });
 
-  const serveApplication = async (req: Request, res: Response) => {
+  const serveApplication = async (req: Request, res: Response, next: NextFunction) => {
     try {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
@@ -293,11 +293,19 @@ function registerProductionStaticRoutes(expressApp: Express, staticRoot: string,
       res.send(noncedHtml);
     } catch (error) {
       console.error('Error serving index.html:', error);
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
       res.status(500).send('Internal Server Error');
     }
   };
 
-  expressApp.get('/', pageRateLimiter, serveApplication);
+  const serveApplicationRoute = (req: Request, res: Response, next: NextFunction): void => {
+    void serveApplication(req, res, next).catch(next);
+  };
+
+  expressApp.get('/', pageRateLimiter, serveApplicationRoute);
   expressApp.get('/privacy', pageRateLimiter, (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -310,7 +318,7 @@ function registerProductionStaticRoutes(expressApp: Express, staticRoot: string,
   });
 
   // SPA sub-routes (React Router)
-  expressApp.get(/^\/(?!api|static|assets)(?!.*\.[a-zA-Z0-9]+$).*/, pageRateLimiter, serveApplication);
+  expressApp.get(/^\/(?!api|static|assets)(?!.*\.[a-zA-Z0-9]+$).*/, pageRateLimiter, serveApplicationRoute);
 
   // Static assets
   expressApp.use(express.static(staticRoot));
