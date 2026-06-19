@@ -7,7 +7,7 @@
 import type { TChatConversation } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
 import type { IProject } from '@/common/types/project';
-import type { ProjectOutboundMessage } from '@/common/types/projectExecutiveAssistant';
+import type { ProjectInboundAssistantEmail, ProjectOutboundMessage } from '@/common/types/projectExecutiveAssistant';
 import { Button } from '@arco-design/web-react';
 import { ArrowRight, Ban, Clock3, DownloadCloud, FileText, Mail, MessageSquare, Send } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -52,6 +52,7 @@ type HistoryKind =
   | 'remote-ignore'
   | 'remote-pending'
   | 'outbound'
+  | 'assistant-reply'
   | 'inventory';
 
 type HistoryFilter = 'all' | 'chat' | 'email' | 'reference' | 'remote' | 'outbound';
@@ -118,6 +119,7 @@ async function parseEmailHistoryResponse(response: Response): Promise<EmailInges
 function iconFor(kind: HistoryKind): React.ReactNode {
   if (kind === 'chat') return <MessageSquare size={15} />;
   if (kind === 'email') return <Mail size={15} />;
+  if (kind === 'assistant-reply') return <Mail size={15} />;
   if (kind === 'outbound') return <Send size={15} />;
   if (kind === 'reference' || kind === 'inventory') return <FileText size={15} />;
   if (kind === 'remote-import' || kind === 'remote-pending') return <DownloadCloud size={15} />;
@@ -129,6 +131,7 @@ function itemMatchesFilter(item: HistoryItem, filter: HistoryFilter): boolean {
   if (filter === 'all') return true;
   if (filter === 'reference') return item.kind === 'reference' || item.kind === 'inventory';
   if (filter === 'remote') return item.kind === 'remote-import' || item.kind === 'remote-ignore' || item.kind === 'remote-pending';
+  if (filter === 'outbound') return item.kind === 'outbound' || item.kind === 'assistant-reply';
   return item.kind === filter;
 }
 
@@ -138,6 +141,7 @@ function buildHistoryItems(
   emailHistory: EmailIngestRecord[],
   references: ReferenceFile[],
   outbound: ProjectOutboundMessage[],
+  inbound: ProjectInboundAssistantEmail[],
 ): HistoryItem[] {
   const items: HistoryItem[] = [];
   const knownReferenceNames = new Set<string>();
@@ -333,6 +337,56 @@ function buildHistoryItems(
     });
   }
 
+  for (const reply of inbound) {
+    const savedReferenceCount = reply.referenceFiles?.length ?? 0;
+    items.push({
+      id: `assistant-reply-${reply.id}`,
+      kind: 'assistant-reply',
+      time: normalizeTime(reply.receivedAt ?? reply.createTime),
+      title: reply.subject || 'Assistant email reply',
+      eyebrow: reply.status === 'needs-review' ? 'Reply needs review' : 'Assistant reply',
+      summary:
+        reply.status === 'needs-review'
+          ? `WL received this AgentMail reply from ${reply.from}, but only matched it by weak sender/subject evidence. Review it before acting on it.`
+          : `WL matched this AgentMail reply from ${reply.from} back to a Project Assistant outbound email and saved it into the project.`,
+      detail: `From ${reply.contactName ? `${reply.contactName} · ` : ''}${reply.from}`,
+      meta: compact([
+        reply.status,
+        reply.matchReason,
+        reply.projectRef,
+        reply.attachmentCount ? fileCountLabel(reply.attachmentCount, 'attachment') : undefined,
+        savedReferenceCount ? fileCountLabel(savedReferenceCount, 'reference') : undefined,
+      ]),
+      related: [
+        { label: 'From', value: reply.from },
+        { label: 'Status', value: reply.status },
+        { label: 'Match', value: reply.matchReason },
+        ...(reply.projectRef ? [{ label: 'Project ref', value: reply.projectRef }] : []),
+        ...(reply.contactName ? [{ label: 'Contact', value: reply.contactName }] : []),
+        ...(reply.reviewReason ? [{ label: 'Review reason', value: reply.reviewReason }] : []),
+      ],
+    });
+
+    for (const fileName of reply.referenceFiles ?? []) {
+      knownReferenceNames.add(fileName);
+      items.push({
+        id: `assistant-reply-reference-${reply.id}-${fileName}`,
+        kind: 'reference',
+        time: normalizeTime(reply.receivedAt ?? reply.createTime),
+        title: 'Reference saved from Assistant reply',
+        eyebrow: 'Reference',
+        summary: `WL saved "${fileName}" from the AgentMail reply "${reply.subject || 'Assistant email reply'}". This file is now available as project context.`,
+        detail: fileName,
+        meta: reply.subject,
+        related: [
+          { label: 'File', value: fileName },
+          { label: 'Source reply', value: reply.subject || 'Assistant email reply' },
+          { label: 'From', value: reply.from },
+        ],
+      });
+    }
+  }
+
   for (const reference of references) {
     if (knownReferenceNames.has(reference.name)) continue;
     items.push({
@@ -361,6 +415,7 @@ const ProjectHistoryPanel: React.FC<{
   const [emailHistory, setEmailHistory] = useState<EmailIngestRecord[]>([]);
   const [references, setReferences] = useState<ReferenceFile[]>([]);
   const [outbound, setOutbound] = useState<ProjectOutboundMessage[]>([]);
+  const [inbound, setInbound] = useState<ProjectInboundAssistantEmail[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>('all');
@@ -385,6 +440,7 @@ const ProjectHistoryPanel: React.FC<{
       setReferences(nextReferences);
       setEmailHistory(nextHistory);
       setOutbound(assistantState.outbound);
+      setInbound(assistantState.inbound ?? []);
     } catch (err) {
       console.warn('[ProjectHistoryPanel] history load failed:', err);
     } finally {
@@ -397,8 +453,8 @@ const ProjectHistoryPanel: React.FC<{
   }, [load]);
 
   const items = useMemo(
-    () => buildHistoryItems(project, conversations, emailHistory, references, outbound),
-    [project, conversations, emailHistory, references, outbound],
+    () => buildHistoryItems(project, conversations, emailHistory, references, outbound, inbound),
+    [project, conversations, emailHistory, references, outbound, inbound],
   );
 
   const visibleItems = useMemo(() => items.filter((item) => itemMatchesFilter(item, filter)), [items, filter]);
@@ -422,9 +478,9 @@ const ProjectHistoryPanel: React.FC<{
       emails: emailHistory.length,
       references: references.length,
       remotes: emailHistory.reduce((count, record) => count + (record.remoteAttachmentLinks?.length ?? 0), 0),
-      outbound: outbound.length,
+      outbound: outbound.length + inbound.length,
     }),
-    [conversations.length, emailHistory, items.length, references.length, outbound.length],
+    [conversations.length, emailHistory, items.length, references.length, outbound.length, inbound.length],
   );
 
   const filterOptions: Array<{ key: HistoryFilter; label: string; count: number }> = [

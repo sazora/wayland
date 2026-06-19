@@ -37,10 +37,12 @@ import { ImessagePlugin } from '../plugins/tier2/imessage/ImessagePlugin';
 import { SignalPlugin } from '../plugins/tier1/signal/SignalPlugin';
 import { MsTeamsPlugin } from '../plugins/tier2/ms-teams/MsTeamsPlugin';
 import { isBuiltinChannelPlatform, resolveChannelConvType } from '../types';
-import type { ChannelPlatform, IChannelPluginConfig, PluginType } from '../types';
+import type { ChannelPlatform, IChannelPluginConfig, IUnifiedIncomingMessage, PluginType } from '../types';
 import { getTokenStore, registerWebhookDispatcher } from '../webhook';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { SessionManager } from './SessionManager';
+import { ingestProjectAssistantEmailReply } from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
+import { projectServiceSingleton } from '@process/services/projectServiceSingleton';
 
 /**
  * ChannelManager - Main orchestrator for the Channel subsystem
@@ -145,7 +147,17 @@ export class ChannelManager {
 
       // Create action executor and wire up message handling
       this.actionExecutor = new ActionExecutor(this.pluginManager, this.sessionManager, this.pairingService);
-      this.pluginManager.setMessageHandler(this.actionExecutor.getMessageHandler());
+      const normalMessageHandler = this.actionExecutor.getMessageHandler();
+      this.pluginManager.setMessageHandler(async (message: IUnifiedIncomingMessage) => {
+        const result = await ingestProjectAssistantEmailReply(message, projectServiceSingleton);
+        if (result.handled) {
+          console.log(
+            `[ChannelManager] Routed ${message.platform} reply ${message.id} into project ${result.projectId} (${result.status})`
+          );
+          return;
+        }
+        await normalMessageHandler(message);
+      });
 
       // Set confirm handler for tool confirmations
       this.pluginManager.setConfirmHandler(async (userId: string, platform: string, callId: string, value: string) => {

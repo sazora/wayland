@@ -15,11 +15,14 @@ import {
   createProjectOutbound,
   EMAIL_OUTBOUND_FOOTER,
   formatProjectOutboundBody,
+  ingestProjectAssistantEmailReply,
   PROJECT_ASSISTANT_BRAND,
   readProjectExecutiveAssistant,
   SMS_OUTBOUND_ONLY_NOTICE,
   sendProjectOutbound,
 } from '@process/services/projectExecutiveAssistant/ProjectExecutiveAssistantService';
+import type { IProject } from '@/common/types/project';
+import type { IProjectService } from '@process/services/IProjectService';
 
 let ws: string;
 type MockChannelPlugin = {
@@ -148,9 +151,10 @@ describe('ProjectExecutiveAssistantService', () => {
       'norman@example.com',
       expect.objectContaining({
         subject: 'Drone policy references',
-        text: `We imported the reference files.\n\n${EMAIL_OUTBOUND_FOOTER}`,
+        text: expect.stringContaining(`We imported the reference files.\n\n${EMAIL_OUTBOUND_FOOTER}\nProject Ref: WL-`),
       }),
     );
+    expect(outbound.projectRef).toMatch(/^WL-[A-Z0-9]{10}$/);
   });
 
   it('marks Twilio sends as failed when the provider immediately reports undelivered', async () => {
@@ -254,4 +258,142 @@ describe('ProjectExecutiveAssistantService', () => {
     expect(cleared.outbound).toEqual([]);
     await expect(sendProjectOutbound(ws, 'missing-after-clear')).rejects.toThrow('Outbound message not found');
   });
+
+  it('pipes AgentMail replies back into the project by provider message id', async () => {
+    const sendMessage = vi.fn().mockResolvedValue('<agentmail-sent-1@agentmail.to>');
+    channelMocks.plugins = [
+      {
+        status: 'running',
+        type: 'email-agentmail',
+        sendMessage,
+      },
+    ];
+    const outbound = await createProjectOutbound(ws, {
+      channel: 'email',
+      to: 'norman@example.com',
+      subject: 'Drone policy references',
+      body: 'We imported the reference files.',
+      requiresApproval: false,
+    });
+    expect(outbound.status).toBe('sent');
+
+    const result = await ingestProjectAssistantEmailReply(
+      {
+        id: '<reply-1@example.com>',
+        platform: 'email-agentmail',
+        chatId: 'norman@example.com',
+        user: { id: 'norman@example.com', displayName: 'Norman Wood' },
+        content: { type: 'text', text: 'Looks good. Send the updated package.' },
+        timestamp: Date.parse('2026-06-18T20:00:00Z'),
+        replyToMessageId: '<agentmail-sent-1@agentmail.to>',
+        email: {
+          from: 'norman@example.com',
+          to: 'assistant@agentmail.to',
+          subject: 'Re: Drone policy references',
+          messageId: '<reply-1@example.com>',
+          inReplyTo: '<agentmail-sent-1@agentmail.to>',
+          references: ['<agentmail-sent-1@agentmail.to>'],
+        },
+      },
+      projectService([project()])
+    );
+
+    expect(result.handled).toBe(true);
+    if (result.handled) expect(result.status).toBe('saved');
+    const state = await readProjectExecutiveAssistant(ws);
+    expect(state.inbound).toHaveLength(1);
+    expect(state.inbound[0]).toEqual(
+      expect.objectContaining({
+        outboundId: outbound.id,
+        from: 'norman@example.com',
+        status: 'saved',
+        matchReason: 'provider-message-id',
+      }),
+    );
+    expect(state.inbound[0]?.referenceFiles[0]).toMatch(/assistant-reply-/);
+  });
+
+  it('uses Project Ref as a fallback and marks weak subject matches for review', async () => {
+    const outbound = await createProjectOutbound(ws, {
+      channel: 'email',
+      to: 'norman@example.com',
+      subject: 'Project update',
+      body: 'Checking in.',
+    });
+    await approveProjectOutbound(ws, outbound.id);
+    const state = await readProjectExecutiveAssistant(ws);
+    state.outbound[0] = {
+      ...state.outbound[0]!,
+      status: 'sent',
+      provider: 'email-agentmail',
+      providerMessageId: '<sent-without-thread@agentmail.to>',
+      sentAt: Date.now(),
+    };
+    await fs.writeFile(path.join(ws, '.wayland', 'executive-assistant.json'), `${JSON.stringify(state, null, 2)}\n`);
+
+    const refResult = await ingestProjectAssistantEmailReply(
+      {
+        id: '<reply-ref@example.com>',
+        platform: 'email-agentmail',
+        chatId: 'norman@example.com',
+        user: { id: 'norman@example.com', displayName: 'Norman Wood' },
+        content: { type: 'text', text: `Received.\n\nProject Ref: ${outbound.projectRef}` },
+        timestamp: Date.now(),
+        email: {
+          from: 'norman@example.com',
+          to: 'assistant@agentmail.to',
+          subject: 'different subject',
+          messageId: '<reply-ref@example.com>',
+        },
+      },
+      projectService([project()])
+    );
+    expect(refResult.handled).toBe(true);
+    if (refResult.handled) expect(refResult.status).toBe('saved');
+
+    const weakResult = await ingestProjectAssistantEmailReply(
+      {
+        id: '<reply-weak@example.com>',
+        platform: 'email-agentmail',
+        chatId: 'norman@example.com',
+        user: { id: 'norman@example.com', displayName: 'Norman Wood' },
+        content: { type: 'text', text: 'Reply without headers or project ref.' },
+        timestamp: Date.now(),
+        email: {
+          from: 'norman@example.com',
+          to: 'assistant@agentmail.to',
+          subject: 'Re: Project update',
+          messageId: '<reply-weak@example.com>',
+        },
+      },
+      projectService([project()])
+    );
+    expect(weakResult.handled).toBe(true);
+    if (weakResult.handled) expect(weakResult.status).toBe('needs-review');
+  });
 });
+
+function project(overrides: Partial<IProject> = {}): IProject {
+  return {
+    id: 'project-1',
+    name: 'Test Project',
+    workspace: ws,
+    pinned: false,
+    createTime: Date.now(),
+    modifyTime: Date.now(),
+    ...overrides,
+  };
+}
+
+function projectService(projects: IProject[]): IProjectService {
+  return {
+    createProject: vi.fn(),
+    updateProject: vi.fn(),
+    removeProject: vi.fn(),
+    getProject: vi.fn(async (id: string) => projects.find((candidate) => candidate.id === id) ?? null),
+    listProjects: vi.fn(async () => projects),
+    getProjectConversations: vi.fn(),
+    assignConversation: vi.fn(),
+    removeConversationFromProject: vi.fn(),
+  } as unknown as IProjectService;
+}

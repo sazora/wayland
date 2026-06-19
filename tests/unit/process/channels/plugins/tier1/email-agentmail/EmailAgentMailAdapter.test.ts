@@ -91,6 +91,45 @@ describe('toUnifiedIncomingFromAgentMail', () => {
     expect(unified?.user.displayName).toBe('carol@example.com');
     expect(unified?.email?.subject).toBe('(no subject)');
   });
+
+  it('maps current AgentMail webhook fields and attachment metadata', () => {
+    const unified = toUnifiedIncomingFromAgentMail(
+      {
+        event_type: 'message.received',
+        message: {
+          message_id: '<current-shape@agentmail.to>',
+          inbox_id: inboxAddress,
+          from_: ['client@example.com'],
+          to: [inboxAddress],
+          subject: 'Re: Project update',
+          extracted_text: 'New reply only.',
+          timestamp: '2026-06-18T20:10:00Z',
+          in_reply_to_message_id: '<sent@agentmail.to>',
+          attachments: [
+            {
+              attachment_id: 'att_123',
+              filename: 'site-plan.pdf',
+              content_type: 'application/pdf',
+              size: 12345,
+            },
+          ],
+        },
+      },
+      inboxAddress
+    );
+
+    expect(unified?.chatId).toBe('client@example.com');
+    expect(unified?.content.text).toBe('New reply only.');
+    expect(unified?.replyToMessageId).toBe('<sent@agentmail.to>');
+    expect(unified?.content.attachments).toEqual([
+      expect.objectContaining({
+        fileId: 'att_123',
+        fileName: 'site-plan.pdf',
+        mimeType: 'application/pdf',
+        size: 12345,
+      }),
+    ]);
+  });
 });
 
 describe('toAgentMailSendBody', () => {

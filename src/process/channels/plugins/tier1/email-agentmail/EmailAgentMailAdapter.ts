@@ -17,18 +17,34 @@ import type { IUnifiedIncomingMessage, IUnifiedOutgoingMessage } from '../../../
  */
 export type AgentMailInboundPayload = {
   readonly event?: string;
+  readonly event_type?: string;
   readonly message?: {
     readonly id?: string;
     readonly message_id?: string;
+    readonly inbox_id?: string;
+    readonly thread_id?: string;
     readonly from?: string;
+    readonly from_?: string | readonly string[];
     readonly from_name?: string;
     readonly to?: string | readonly string[];
+    readonly reply_to?: string | readonly string[];
     readonly subject?: string;
     readonly text?: string;
+    readonly extracted_text?: string;
     readonly html?: string;
+    readonly extracted_html?: string;
     readonly in_reply_to?: string;
+    readonly in_reply_to_message_id?: string;
     readonly references?: readonly string[];
     readonly received_at?: string | number;
+    readonly timestamp?: string | number;
+    readonly attachments?: readonly {
+      readonly attachment_id?: string;
+      readonly id?: string;
+      readonly filename?: string;
+      readonly content_type?: string;
+      readonly size?: number;
+    }[];
   };
 };
 
@@ -60,13 +76,13 @@ export function toUnifiedIncomingFromAgentMail(
   if (!message) return null;
 
   const messageId = (message.message_id ?? message.id ?? '').trim();
-  const from = (message.from ?? '').trim();
+  const from = pickAddress(message.from ?? message.from_);
   if (!messageId || !from) return null;
 
   const toRaw = message.to;
   const to = Array.isArray(toRaw) ? (toRaw[0] ?? inboxAddress) : (typeof toRaw === 'string' ? toRaw : inboxAddress);
 
-  const text = pickBodyText(message.text, message.html);
+  const text = pickBodyText(message.extracted_text ?? message.text, message.extracted_html ?? message.html);
   const subject = typeof message.subject === 'string' && message.subject.length > 0
     ? message.subject
     : DEFAULT_SUBJECT;
@@ -75,9 +91,17 @@ export function toUnifiedIncomingFromAgentMail(
     ? message.from_name
     : from;
 
-  const timestamp = normalizeTimestamp(message.received_at);
+  const timestamp = normalizeTimestamp(message.received_at ?? message.timestamp);
 
   const references = Array.isArray(message.references) ? message.references.slice() : undefined;
+  const replyTo = message.in_reply_to ?? message.in_reply_to_message_id;
+  const attachments = (message.attachments ?? []).map((attachment) => ({
+    type: 'document' as const,
+    fileId: attachment.attachment_id ?? attachment.id ?? attachment.filename ?? 'agentmail-attachment',
+    fileName: attachment.filename,
+    mimeType: attachment.content_type,
+    size: attachment.size,
+  }));
 
   return {
     id: messageId,
@@ -90,16 +114,17 @@ export function toUnifiedIncomingFromAgentMail(
     content: {
       type: 'text',
       text,
+      ...(attachments.length > 0 ? { attachments } : {}),
     },
     timestamp,
-    replyToMessageId: typeof message.in_reply_to === 'string' ? message.in_reply_to : undefined,
+    replyToMessageId: typeof replyTo === 'string' ? replyTo : undefined,
     raw: payload,
     email: {
       from,
       to,
       subject,
       messageId,
-      inReplyTo: typeof message.in_reply_to === 'string' ? message.in_reply_to : undefined,
+      inReplyTo: typeof replyTo === 'string' ? replyTo : undefined,
       references,
     },
   };
@@ -132,6 +157,11 @@ function pickBodyText(text: string | undefined, html: string | undefined): strin
   if (typeof text === 'string' && text.length > 0) return text;
   if (typeof html === 'string' && html.length > 0) return stripHtml(html);
   return '';
+}
+
+function pickAddress(value: string | readonly string[] | undefined): string {
+  if (Array.isArray(value)) return (value[0] ?? '').trim();
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 /**

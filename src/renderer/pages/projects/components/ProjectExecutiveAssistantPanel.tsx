@@ -28,7 +28,7 @@ const CHANNEL_OPTIONS: Array<{ label: string; value: ProjectCommunicationChannel
   { label: 'Text (Twilio)', value: 'sms' },
 ];
 
-const defaultState: ProjectExecutiveAssistantState = { contacts: [], outbound: [] };
+const defaultState: ProjectExecutiveAssistantState = { contacts: [], outbound: [], inbound: [] };
 
 const channelIcon = (channel: ProjectCommunicationChannel): React.ReactNode => {
   if (channel === 'email') return <Mail size={14} />;

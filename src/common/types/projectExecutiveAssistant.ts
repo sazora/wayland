@@ -38,13 +38,41 @@ export type ProjectOutboundMessage = {
   error?: string;
   provider?: string;
   providerMessageId?: string;
+  projectRef?: string;
   createTime: number;
   modifyTime: number;
+};
+
+export type ProjectInboundAssistantEmailStatus = 'saved' | 'needs-review' | 'failed';
+
+export type ProjectInboundAssistantEmail = {
+  id: string;
+  outboundId?: string;
+  contactId?: string;
+  contactName?: string;
+  channel: 'email';
+  from: string;
+  to?: string;
+  subject?: string;
+  body: string;
+  status: ProjectInboundAssistantEmailStatus;
+  receivedAt: number;
+  provider: 'email-agentmail' | 'email-imap';
+  providerMessageId?: string;
+  inReplyTo?: string;
+  references?: string[];
+  projectRef?: string;
+  matchReason: 'provider-message-id' | 'project-ref' | 'sender-subject' | 'manual-review';
+  reviewReason?: string;
+  attachmentCount: number;
+  referenceFiles: string[];
+  createTime: number;
 };
 
 export type ProjectExecutiveAssistantState = {
   contacts: ProjectContact[];
   outbound: ProjectOutboundMessage[];
+  inbound: ProjectInboundAssistantEmail[];
 };
 
 export type ProjectOutboundCapability = {

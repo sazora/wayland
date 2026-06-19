@@ -19,7 +19,7 @@
  *
  * The exact AgentMail API URL is exposed as a `const` at the top of the file
  * so a future PR can correct it without touching the plugin shape; the
- * documented base is https://api.agentmail.com/v0.
+ * documented base is https://api.agentmail.to/v0.
  */
 
 import type {
@@ -41,7 +41,9 @@ import {
  * Canonical AgentMail v0 REST base. Stored as a const so a future PR can fix
  * it in one place once the live API is reachable from the build environment.
  */
-const AGENTMAIL_API_BASE = 'https://api.agentmail.com/v0';
+const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0';
+const AGENTMAIL_POLL_INTERVAL_MS = 10 * 60 * 1000;
+const AGENTMAIL_POLL_LIMIT = 50;
 
 /**
  * AgentMail inbox descriptor - minimal subset of the `/v0/inboxes` listing
@@ -50,6 +52,8 @@ const AGENTMAIL_API_BASE = 'https://api.agentmail.com/v0';
  */
 type AgentMailInbox = {
   readonly id?: string;
+  readonly inbox_id?: string;
+  readonly email?: string;
   readonly address?: string;
   readonly email_address?: string;
 };
@@ -58,6 +62,11 @@ type AgentMailSendResponse = {
   readonly message_id?: string;
   readonly id?: string;
 };
+
+type AgentMailMessage = NonNullable<AgentMailInboundPayload['message']>;
+type AgentMailMessagesListResponse =
+  | { readonly messages?: readonly AgentMailMessage[]; readonly data?: readonly AgentMailMessage[] }
+  | readonly AgentMailMessage[];
 
 export class EmailAgentMailPlugin extends BasePlugin {
   readonly type: PluginType = 'email-agentmail';
@@ -72,6 +81,9 @@ export class EmailAgentMailPlugin extends BasePlugin {
   private apiKey: string | null = null;
   private inboxAddress: string | null = null;
   private readonly activeUsers: Set<string> = new Set();
+  private readonly seenInboundMessageIds: Set<string> = new Set();
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPollAfterIso: string | null = null;
 
   /**
    * Validate credentials - apiKey + inboxAddress are both required. The
@@ -95,7 +107,16 @@ export class EmailAgentMailPlugin extends BasePlugin {
    * traffic via `handleWebhookPayload`.
    */
   protected async onStart(): Promise<void> {
-    // No-op: AgentMail delivery is fully push-based via WebhookReceiver.
+    this.lastPollAfterIso = new Date(Date.now() - AGENTMAIL_POLL_INTERVAL_MS).toISOString();
+    this.pollTimer = setInterval(() => {
+      void this.pollRecentMessages().catch((error) => {
+        console.warn('[email-agentmailPlugin] Poll failed:', error);
+      });
+    }, AGENTMAIL_POLL_INTERVAL_MS);
+    this.pollTimer.unref?.();
+    void this.pollRecentMessages().catch((error) => {
+      console.warn('[email-agentmailPlugin] Initial poll failed:', error);
+    });
   }
 
   /**
@@ -106,6 +127,10 @@ export class EmailAgentMailPlugin extends BasePlugin {
     this.apiKey = null;
     this.inboxAddress = null;
     this.activeUsers.clear();
+    this.seenInboundMessageIds.clear();
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    this.lastPollAfterIso = null;
   }
 
   getActiveUserCount(): number {
@@ -146,7 +171,7 @@ export class EmailAgentMailPlugin extends BasePlugin {
     }
 
     const body = toAgentMailSendBody(message, chatId);
-    const url = `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(this.inboxAddress)}/messages`;
+    const url = `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(this.inboxAddress)}/messages/send`;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -188,6 +213,8 @@ export class EmailAgentMailPlugin extends BasePlugin {
       );
       return;
     }
+    if (this.seenInboundMessageIds.has(unified.id)) return;
+    this.seenInboundMessageIds.add(unified.id);
     this.activeUsers.add(unified.user.id);
     await this.emitMessage(unified);
   }
@@ -198,6 +225,48 @@ export class EmailAgentMailPlugin extends BasePlugin {
    */
   toUnifiedIncomingMessage(payload: AgentMailInboundPayload): IUnifiedIncomingMessage | null {
     return toUnifiedIncomingFromAgentMail(payload, this.inboxAddress ?? '');
+  }
+
+  /**
+   * Polling fallback for deployments where AgentMail webhooks are delayed,
+   * disabled, or not yet configured. Webhooks remain the primary path; this
+   * only fetches recent messages and routes unseen message.received payloads
+   * through the same converter/handler.
+   */
+  async pollRecentMessages(): Promise<number> {
+    if (!this.apiKey || !this.inboxAddress) return 0;
+    const params = new URLSearchParams({ limit: String(AGENTMAIL_POLL_LIMIT) });
+    if (this.lastPollAfterIso) params.set('after', this.lastPollAfterIso);
+    const url = `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(this.inboxAddress)}/messages?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${this.apiKey}`,
+        accept: 'application/json',
+      },
+    });
+    if (!response.ok) {
+      const errText = await safeReadText(response);
+      throw new Error(`AgentMail poll failed (${response.status}): ${errText}`);
+    }
+
+    const json = (await response.json().catch((): AgentMailMessage[] => [])) as AgentMailMessagesListResponse;
+    const messages: readonly AgentMailMessage[] = Array.isArray(json)
+      ? json
+      : ((json as { readonly messages?: readonly AgentMailMessage[]; readonly data?: readonly AgentMailMessage[] }).messages ??
+        (json as { readonly data?: readonly AgentMailMessage[] }).data ??
+        []);
+    let emitted = 0;
+    const nextAfter = new Date().toISOString();
+    for (const message of messages) {
+      if (!message) continue;
+      const id = message.message_id ?? message.id;
+      if (id && this.seenInboundMessageIds.has(id)) continue;
+      await this.handleWebhookPayload({ event_type: 'message.received', message }, {}, 'email-agentmail_poll');
+      emitted += 1;
+    }
+    this.lastPollAfterIso = nextAfter;
+    return emitted;
   }
 
   // ==================== Static Methods ====================
@@ -241,7 +310,7 @@ export class EmailAgentMailPlugin extends BasePlugin {
         ? (data as readonly AgentMailInbox[])
         : ((data as { readonly inboxes?: readonly AgentMailInbox[] } | null)?.inboxes ?? []);
       const first = inboxes[0];
-      const address = first?.address ?? first?.email_address ?? first?.id;
+      const address = first?.inbox_id ?? first?.email ?? first?.address ?? first?.email_address ?? first?.id;
       if (!address) {
         return { success: false, error: 'No AgentMail inboxes found for this API key' };
       }

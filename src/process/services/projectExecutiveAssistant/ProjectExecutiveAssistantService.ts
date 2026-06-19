@@ -6,10 +6,12 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import type { IProject } from '@/common/types/project';
 import { uuid } from '@/common/utils';
 import type {
   CreateProjectContactParams,
   CreateProjectOutboundParams,
+  ProjectInboundAssistantEmail,
   ProjectCommunicationChannel,
   ProjectContact,
   ProjectExecutiveAssistantState,
@@ -18,11 +20,15 @@ import type {
   UpdateProjectContactParams,
 } from '@/common/types/projectExecutiveAssistant';
 import { getChannelManager } from '@process/channels';
+import type { IUnifiedAttachment, IUnifiedIncomingMessage } from '@process/channels/types';
 import type { BasePlugin } from '@process/channels';
+import type { IProjectService } from '@process/services/IProjectService';
 import { WAYLAND_KNOWLEDGE_DIR } from '@process/services/projectKnowledge/bootstrap';
+import { writeProjectReferenceFile } from '@process/services/projectKnowledge/knowledge';
 
 const EA_FILE = 'executive-assistant.json';
 const MAX_OUTBOUND_RECORDS = 500;
+const MAX_INBOUND_RECORDS = 500;
 export const PROJECT_ASSISTANT_BRAND = 'CKSZ / AerdiA';
 const LEGACY_SMS_OUTBOUND_ONLY_NOTICE = 'Reply HELP for help or STOP to opt out.';
 export const SMS_OUTBOUND_ONLY_NOTICE = `${PROJECT_ASSISTANT_BRAND}: Reply HELP for help or STOP to opt out.`;
@@ -32,10 +38,12 @@ export const EMAIL_OUTBOUND_FOOTER = [
   `Project coordination message from ${PROJECT_ASSISTANT_BRAND}.`,
   'If this reached you in error, reply to this email and let us know.',
 ].join('\n');
+export const PROJECT_ASSISTANT_REF_PREFIX = 'WL';
 
 const DEFAULT_STATE: ProjectExecutiveAssistantState = {
   contacts: [],
   outbound: [],
+  inbound: [],
 };
 
 type DeliveryStatus = {
@@ -67,11 +75,13 @@ const normalizeTarget = (channel: ProjectCommunicationChannel, value: string): s
   return target;
 };
 
-export const formatProjectOutboundBody = (channel: ProjectCommunicationChannel, body: string): string => {
+export const formatProjectOutboundBody = (channel: ProjectCommunicationChannel, body: string, projectRef?: string): string => {
   const trimmed = body.trim();
   if (channel === 'email') {
-    if (trimmed.includes(EMAIL_OUTBOUND_FOOTER)) return trimmed;
-    return `${trimmed}\n\n${EMAIL_OUTBOUND_FOOTER}`;
+    const footer = projectRef ? `${EMAIL_OUTBOUND_FOOTER}\nProject Ref: ${projectRef}` : EMAIL_OUTBOUND_FOOTER;
+    if (projectRef && new RegExp(`\\bProject Ref:\\s*${escapeRegex(projectRef)}\\b`, 'i').test(trimmed)) return trimmed;
+    if (!projectRef && trimmed.includes(EMAIL_OUTBOUND_FOOTER)) return trimmed;
+    return `${trimmed}\n\n${footer}`;
   }
   if (channel !== 'sms') return trimmed;
   if (trimmed.includes(SMS_OUTBOUND_ONLY_NOTICE)) return trimmed;
@@ -84,6 +94,7 @@ export const formatProjectOutboundBody = (channel: ProjectCommunicationChannel, 
 const normalizeState = (raw: Partial<ProjectExecutiveAssistantState> | null | undefined): ProjectExecutiveAssistantState => ({
   contacts: Array.isArray(raw?.contacts) ? raw.contacts : [],
   outbound: Array.isArray(raw?.outbound) ? raw.outbound : [],
+  inbound: Array.isArray(raw?.inbound) ? raw.inbound : [],
 });
 
 async function readState(workspace: string): Promise<ProjectExecutiveAssistantState> {
@@ -91,7 +102,7 @@ async function readState(workspace: string): Promise<ProjectExecutiveAssistantSt
     const raw = await fs.readFile(statePath(workspace), 'utf-8');
     return normalizeState(JSON.parse(raw) as Partial<ProjectExecutiveAssistantState>);
   } catch {
-    return { ...DEFAULT_STATE, contacts: [], outbound: [] };
+    return { ...DEFAULT_STATE, contacts: [], outbound: [], inbound: [] };
   }
 }
 
@@ -104,6 +115,38 @@ async function writeState(workspace: string, state: ProjectExecutiveAssistantSta
 function runningPlugins(): BasePlugin[] {
   const manager = getChannelManager().getPluginManager();
   return manager?.getAllPlugins().filter((plugin) => plugin.status === 'running') ?? [];
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function newProjectRef(): string {
+  return `${PROJECT_ASSISTANT_REF_PREFIX}-${`${uuid()}${uuid()}`.replace(/-/g, '').slice(0, 10).toUpperCase()}`;
+}
+
+function normalizeMessageId(value: string | undefined): string {
+  return (value ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
+}
+
+function normalizeAddress(value: string | undefined): string {
+  const raw = (value ?? '').trim().toLowerCase();
+  const match = raw.match(/<([^>]+)>/);
+  return (match?.[1] ?? raw).trim();
+}
+
+function normalizeSubject(value: string | undefined): string {
+  return (value ?? '')
+    .trim()
+    .replace(/^((re|fw|fwd):\s*)+/i, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function projectRefFromText(...values: Array<string | undefined>): string | undefined {
+  const text = values.filter(Boolean).join('\n');
+  const match = text.match(/\bProject Ref:\s*(WL-[A-Z0-9-]{6,})\b/i);
+  return match?.[1]?.toUpperCase();
 }
 
 function pickPlugin(channel: ProjectCommunicationChannel): BasePlugin | null {
@@ -242,6 +285,7 @@ export async function createProjectOutbound(workspace: string, params: CreatePro
     body: params.body.trim(),
     status: params.requiresApproval === false ? 'draft' : 'pending-approval',
     requiresApproval: params.requiresApproval ?? true,
+    projectRef: channel === 'email' ? newProjectRef() : undefined,
     createTime: now,
     modifyTime: now,
   };
@@ -311,7 +355,7 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
   try {
     const providerMessageId = await plugin.sendMessage(message.to, {
       type: 'text',
-      text: formatProjectOutboundBody(sendChannel, message.body),
+      text: formatProjectOutboundBody(sendChannel, message.body, message.projectRef),
       subject: message.subject,
     });
     const deliveryStatus = await readDeliveryStatus(plugin, providerMessageId);
@@ -340,4 +384,175 @@ export async function sendProjectOutbound(workspace: string, messageId: string):
   }
   await writeState(workspace, state);
   return message;
+}
+
+type ProjectAssistantReplyMatch = {
+  project: IProject;
+  state: ProjectExecutiveAssistantState;
+  outbound: ProjectOutboundMessage;
+  score: number;
+  reason: ProjectInboundAssistantEmail['matchReason'];
+};
+
+export type ProjectAssistantEmailReplyIngestResult =
+  | { handled: true; status: 'saved' | 'needs-review'; projectId: string; inbound: ProjectInboundAssistantEmail }
+  | { handled: false; reason: 'not-email-agentmail' | 'no-match' | 'ambiguous' | 'missing-project-workspace' };
+
+export async function ingestProjectAssistantEmailReply(
+  message: IUnifiedIncomingMessage,
+  projectService: IProjectService
+): Promise<ProjectAssistantEmailReplyIngestResult> {
+  if (message.platform !== 'email-agentmail' && message.platform !== 'email-imap') {
+    return { handled: false, reason: 'not-email-agentmail' };
+  }
+
+  const projects = await projectService.listProjects();
+  const matches: ProjectAssistantReplyMatch[] = [];
+  const inboundMessageId = normalizeMessageId(message.email?.messageId || message.id);
+  const inReplyTo = normalizeMessageId(message.email?.inReplyTo || message.replyToMessageId);
+  const references = (message.email?.references ?? []).map(normalizeMessageId).filter(Boolean);
+  const projectRef = projectRefFromText(message.content.text, message.email?.subject);
+  const from = normalizeAddress(message.email?.from || message.user.id);
+  const inboundSubject = normalizeSubject(message.email?.subject);
+
+  for (const project of projects) {
+    if (!project.workspace) continue;
+    const state = await readState(project.workspace);
+    for (const outbound of state.outbound) {
+      if (outbound.channel !== 'email' || outbound.status !== 'sent') continue;
+      const providerMessageId = normalizeMessageId(outbound.providerMessageId);
+      const outboundRef = outbound.projectRef?.toUpperCase();
+      const outboundSubject = normalizeSubject(outbound.subject);
+      const outboundTo = normalizeAddress(outbound.to);
+
+      if (providerMessageId && (providerMessageId === inReplyTo || references.includes(providerMessageId))) {
+        matches.push({ project, state, outbound, score: 100, reason: 'provider-message-id' });
+        continue;
+      }
+      if (outboundRef && projectRef && outboundRef === projectRef) {
+        matches.push({ project, state, outbound, score: 90, reason: 'project-ref' });
+        continue;
+      }
+      if (from && outboundTo && from === outboundTo && inboundSubject && outboundSubject && inboundSubject === outboundSubject) {
+        matches.push({ project, state, outbound, score: 55, reason: 'sender-subject' });
+      }
+    }
+  }
+
+  if (matches.length === 0) return { handled: false, reason: 'no-match' };
+  matches.sort((a, b) => b.score - a.score);
+  const best = matches[0]!;
+  const tied = matches.filter((match) => match.score === best.score);
+  if (tied.length > 1) return { handled: false, reason: 'ambiguous' };
+  if (!best.project.workspace) return { handled: false, reason: 'missing-project-workspace' };
+
+  const status: Extract<ProjectInboundAssistantEmail['status'], 'saved' | 'needs-review'> =
+    best.score >= 80 ? 'saved' : 'needs-review';
+  const provider: ProjectInboundAssistantEmail['provider'] =
+    message.platform === 'email-imap' ? 'email-imap' : 'email-agentmail';
+  const now = Date.now();
+  const body = message.content.text?.trim() || '(no body text)';
+  const referenceFiles = await saveInboundReferences(best.project.workspace, best.project, message, best.outbound, status);
+  const inbound: ProjectInboundAssistantEmail = {
+    id: uuid(),
+    outboundId: best.outbound.id,
+    contactId: best.outbound.contactId,
+    contactName: best.outbound.contactName,
+    channel: 'email',
+    from,
+    to: message.email?.to,
+    subject: message.email?.subject,
+    body,
+    status,
+    receivedAt: message.timestamp || now,
+    provider,
+    providerMessageId: inboundMessageId || undefined,
+    inReplyTo: message.email?.inReplyTo || message.replyToMessageId,
+    references: message.email?.references ? [...message.email.references] : undefined,
+    projectRef: best.outbound.projectRef || projectRef,
+    matchReason: status === 'needs-review' ? 'manual-review' : best.reason,
+    reviewReason: status === 'needs-review' ? 'Weak sender/subject match; review before acting on the reply.' : undefined,
+    attachmentCount: message.content.attachments?.length ?? 0,
+    referenceFiles,
+    createTime: now,
+  };
+
+  if (inbound.providerMessageId && best.state.inbound.some((item) => item.providerMessageId === inbound.providerMessageId)) {
+    return { handled: true, status, projectId: best.project.id, inbound };
+  }
+
+  best.state.inbound.unshift(inbound);
+  best.state.inbound = best.state.inbound.slice(0, MAX_INBOUND_RECORDS);
+  await writeState(best.project.workspace, best.state);
+  return { handled: true, status, projectId: best.project.id, inbound };
+}
+
+async function saveInboundReferences(
+  workspace: string,
+  project: IProject,
+  message: IUnifiedIncomingMessage,
+  outbound: ProjectOutboundMessage,
+  status: ProjectInboundAssistantEmail['status']
+): Promise<string[]> {
+  const receivedAt = new Date(message.timestamp || Date.now()).toISOString();
+  const subject = message.email?.subject?.trim() || '(no subject)';
+  const from = normalizeAddress(message.email?.from || message.user.id) || '(unknown sender)';
+  const body = message.content.text?.trim() || '(no body text)';
+  const prefix = `assistant-reply-${Date.now()}-${safeFileSegment(subject)}`;
+  const referenceFiles: string[] = [];
+  const note = await writeProjectReferenceFile(
+    workspace,
+    `${prefix}.md`,
+    [
+      `# Assistant email reply: ${subject}`,
+      '',
+      `- Project: ${project.name}`,
+      `- From: ${from}`,
+      `- To: ${message.email?.to || '(unknown recipient)'}`,
+      `- Received: ${receivedAt}`,
+      `- Status: ${status}`,
+      `- Match: ${outbound.projectRef ? `Project Ref ${outbound.projectRef}` : outbound.providerMessageId || outbound.id}`,
+      `- Original outbound: ${outbound.subject || outbound.id}`,
+      '',
+      '## Body',
+      body,
+    ].join('\n')
+  );
+  referenceFiles.push(note.name);
+
+  const attachments = message.content.attachments ?? [];
+  for (const attachment of attachments) {
+    const saved = await saveLocalAttachment(workspace, prefix, attachment);
+    if (saved) referenceFiles.push(saved);
+  }
+
+  return referenceFiles;
+}
+
+async function saveLocalAttachment(workspace: string, prefix: string, attachment: IUnifiedAttachment): Promise<string | null> {
+  if (!attachment.localPath) return null;
+  try {
+    const bytes = await fs.readFile(attachment.localPath);
+    const saved = await writeProjectReferenceFile(
+      workspace,
+      `${prefix}-${safeFileSegment(attachment.fileName || attachment.fileId || 'attachment')}`,
+      bytes
+    );
+    return saved.name;
+  } catch {
+    return null;
+  }
+}
+
+function safeFileSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/<[^>]+>/g, '')
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .split('')
+    .filter((char) => char.charCodeAt(0) >= 32)
+    .join('')
+    .replace(/\s+/g, '-')
+    .replace(/_+/g, '_')
+    .slice(0, 80) || 'email';
 }

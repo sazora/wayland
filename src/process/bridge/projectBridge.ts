@@ -323,7 +323,7 @@ export function initProjectBridge(): void {
 
   ipcBridge.project.readExecutiveAssistant.provider(async ({ id }) => {
     const project = await projectService.getProject(id);
-    if (!project?.workspace) return { contacts: [], outbound: [] };
+    if (!project?.workspace) return { contacts: [], outbound: [], inbound: [] };
     return readProjectExecutiveAssistant(project.workspace);
   });
 

@@ -74,6 +74,50 @@ describe('EmailAgentMailPlugin.handleWebhookPayload', () => {
     expect(plugin.getActiveUserCount()).toBe(0);
     warn.mockRestore();
   });
+
+  it('polls recent AgentMail messages through the same inbound path without duplicating seen messages', async () => {
+    const plugin = await initPlugin();
+    const emitted: IUnifiedIncomingMessage[] = [];
+    plugin.onMessage(async (msg) => {
+      emitted.push(msg);
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            message_id: '<poll-1@agentmail.to>',
+            from_: ['client@example.com'],
+            to: ['agent@workspace.agentmail.to'],
+            subject: 'Reply',
+            extracted_text: 'Polled body',
+            timestamp: '2026-06-18T20:20:00Z',
+          },
+          {
+            message_id: '<poll-1@agentmail.to>',
+            from_: ['client@example.com'],
+            to: ['agent@workspace.agentmail.to'],
+            subject: 'Reply',
+            extracted_text: 'Duplicate body',
+            timestamp: '2026-06-18T20:20:00Z',
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const count = await plugin.pollRecentMessages();
+
+    expect(count).toBe(1);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].id).toBe('<poll-1@agentmail.to>');
+    expect(emitted[0].content.text).toBe('Polled body');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/inboxes/agent%40workspace.agentmail.to/messages?'),
+      expect.objectContaining({ method: 'GET' }),
+    );
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('verifyAgentMailSignature', () => {
