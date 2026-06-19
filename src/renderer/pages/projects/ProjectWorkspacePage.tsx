@@ -350,7 +350,7 @@ const ProjectWorkspacePage: React.FC = () => {
       {/* Tab content */}
       <div className='flex-1 overflow-hidden'>
         {activeTab === 'overview' && project && (
-          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll} ${styles.workspaceOverviewScroll}`}>
             <ProjectCockpitPanel
               project={project}
               projectId={projectId || ''}
@@ -520,7 +520,7 @@ const ProjectWorkspacePage: React.FC = () => {
         )}
 
         {activeTab === 'assistant' && project && (
-          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll}`}>
+          <div className={`h-full overflow-auto px-24px py-18px ${styles.workspaceScroll} ${styles.workspaceAssistantScroll}`}>
             <ProjectExecutiveAssistantPanel
               projectId={projectId || ''}
               hasWorkspace={!!project.workspace}

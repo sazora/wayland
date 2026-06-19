@@ -221,15 +221,15 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
   }
 
   return (
-    <div className='mx-auto flex max-w-1180px flex-col gap-14px'>
-      <div className='flex flex-wrap items-start justify-between gap-12px'>
+    <div className={`mx-auto flex max-w-1180px flex-col gap-16px ${styles.assistantPanel}`}>
+      <div className={`flex flex-wrap items-start justify-between gap-14px p-16px ${styles.surface} ${styles.assistantHero}`}>
         <div>
           <div className='text-15px font-700 text-t-primary'>Executive assistant</div>
           <div className='mt-2px text-12px leading-relaxed text-t-secondary'>
             Project contacts, external drafts, approval, sending, and communication history.
           </div>
         </div>
-        <div className='flex flex-wrap gap-6px'>
+        <div className={`flex flex-wrap gap-6px ${styles.assistantCapabilityRail}`}>
           {capabilities.map((capability) => (
             <span
               key={capability.channel}
@@ -248,8 +248,8 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
         </div>
       </div>
 
-      <div className='grid gap-14px lg:grid-cols-[0.9fr_1.1fr]'>
-        <section className={`p-16px ${styles.surface}`}>
+      <div className={`grid gap-14px ${styles.assistantPrimaryGrid}`}>
+        <section className={`p-16px ${styles.surface} ${styles.assistantContactsPane}`}>
           <div className='mb-12px flex items-center justify-between gap-10px'>
             <div>
               <h2 className='m-0 text-14px font-700 text-t-primary'>Project contacts</h2>
@@ -281,7 +281,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
             </Button>
           </div>
 
-          <div className='mt-14px flex flex-col gap-8px'>
+          <div className={`mt-14px flex flex-col gap-8px ${styles.assistantContactList}`}>
             {state.contacts.map((contact) => (
               <button
                 key={contact.id}
@@ -310,27 +310,34 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
           </div>
         </section>
 
-        <section className={`p-16px ${styles.surface}`}>
-          <h2 className='m-0 text-14px font-700 text-t-primary'>Draft external message</h2>
-          <p className='m-0 mt-2px text-12px text-t-secondary'>
-            Create an auditable draft, or send immediately when approval is off.
-          </p>
-          <div className='mt-12px grid gap-8px md:grid-cols-[160px_minmax(0,1fr)]'>
-            <Select
-              value={selectedContactId}
-              placeholder='Contact'
-              allowClear
-              onChange={(value) => setSelectedContactId(value || '')}
-              options={state.contacts.map((contact) => ({ label: contact.name, value: contact.id }))}
-            />
-            <div className='grid gap-8px md:grid-cols-[130px_minmax(0,1fr)]'>
+        <section className={`p-16px ${styles.surface} ${styles.assistantComposerPane}`}>
+          <div className='flex flex-wrap items-start justify-between gap-10px'>
+            <div>
+              <h2 className='m-0 text-14px font-700 text-t-primary'>Draft external message</h2>
+              <p className='m-0 mt-2px text-12px text-t-secondary'>
+                Create an auditable draft, or send immediately when approval is off.
+              </p>
+            </div>
+            <span className={styles.assistantModeBadge}>
+              {messageDraft.requiresApproval ? 'Approval required' : 'Sends immediately'}
+            </span>
+          </div>
+          <div className={`mt-14px grid gap-10px ${styles.assistantComposerFields}`}>
+            <div className='grid gap-8px md:grid-cols-[minmax(160px,220px)_130px]'>
+              <Select
+                value={selectedContactId}
+                placeholder='Contact'
+                allowClear
+                onChange={(value) => setSelectedContactId(value || '')}
+                options={state.contacts.map((contact) => ({ label: contact.name, value: contact.id }))}
+              />
               <Select
                 value={messageDraft.channel}
                 options={CHANNEL_OPTIONS}
                 onChange={updateMessageChannel}
               />
-              <Input placeholder='Recipient email or phone' value={messageDraft.to} onChange={(to) => setMessageDraft((draft) => ({ ...draft, to }))} />
             </div>
+            <Input placeholder='Recipient email or phone' value={messageDraft.to} onChange={(to) => setMessageDraft((draft) => ({ ...draft, to }))} />
           </div>
           {messageDraft.channel === 'email' && (
             <Input
@@ -366,7 +373,7 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
         </section>
       </div>
 
-      <section className={`p-16px ${styles.surface}`}>
+      <section className={`p-16px ${styles.surface} ${styles.assistantOutboxPane}`}>
         <div className='mb-12px flex items-center justify-between gap-10px'>
           <div>
             <h2 className='m-0 text-14px font-700 text-t-primary'>Assistant outbox</h2>
@@ -388,9 +395,9 @@ const ProjectExecutiveAssistantPanel: React.FC<Props> = ({ projectId, hasWorkspa
             </Button>
           </div>
         </div>
-        <div className='flex flex-col gap-8px'>
+        <div className={`flex flex-col gap-8px ${styles.assistantOutboxList}`}>
           {state.outbound.map((message) => (
-            <div key={message.id} className={`flex flex-wrap items-start gap-12px px-12px py-10px ${styles.card}`}>
+            <div key={message.id} className={`flex flex-wrap items-start gap-12px px-12px py-10px ${styles.card} ${styles.assistantOutboxItem}`}>
               <div className='flex h-32px w-32px shrink-0 items-center justify-center rd-8px bg-fill-2 text-t-secondary'>
                 {channelIcon(message.channel)}
               </div>
